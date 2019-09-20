@@ -9,9 +9,7 @@ spec:
   group: banzaicloud.banzaicloud.io
   names:
     kind: KafkaTopic
-    listKind: KafkaTopicList
     plural: kafkatopics
-    singular: kafkatopic
   scope: ""
   subresources:
     status: {}

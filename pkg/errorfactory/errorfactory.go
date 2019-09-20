@@ -18,6 +18,7 @@ import "emperror.dev/emperror"
 
 type ResourceNotReady struct{ error }
 type APIFailure struct{ error }
+type VaultAPIFailure struct{ error }
 type StatusUpdateError struct{ error }
 type BrokersUnreachable struct{ error }
 type BrokersNotReady struct{ error }
@@ -36,6 +37,8 @@ func New(t interface{}, err error, msg string, wrapArgs ...interface{}) error {
 		return ResourceNotReady{wrapped}
 	case APIFailure:
 		return APIFailure{wrapped}
+	case VaultAPIFailure:
+		return VaultAPIFailure{wrapped}
 	case StatusUpdateError:
 		return StatusUpdateError{wrapped}
 	case BrokersUnreachable:
@@ -57,5 +60,5 @@ func New(t interface{}, err error, msg string, wrapArgs ...interface{}) error {
 	case FatalReconcileError:
 		return FatalReconcileError{wrapped}
 	}
-	return nil
+	panic("Invalid error type")
 }

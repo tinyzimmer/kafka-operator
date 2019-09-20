@@ -186,12 +186,12 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 			return requeueWithError(reqLogger, "failed to create kafka topic", err)
 		}
 
-		if err = controllerutil.SetControllerReference(cluster, instance, r.Scheme); err != nil {
-			if !k8sutil.IsAlreadyOwnedError(err) {
-				return requeueWithError(reqLogger, "failed to set cluster controller reference on new KafkaTopic", err)
-			}
-		}
+	}
 
+	if err = controllerutil.SetControllerReference(cluster, instance, r.Scheme); err != nil {
+		if !k8sutil.IsAlreadyOwnedError(err) {
+			return requeueWithError(reqLogger, "failed to set cluster controller reference on new KafkaTopic", err)
+		}
 	}
 
 	// ensure a finalizer for cleanup on deletion
@@ -202,7 +202,7 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 
 	// push any changes
 	if err = r.Client.Update(context.TODO(), instance); err != nil {
-		return requeueWithError(reqLogger, "failed to update KafkaTopic with controller reference", err)
+		return requeueWithError(reqLogger, "failed to update KafkaTopic", err)
 	}
 
 	// Do an initial topic status sync

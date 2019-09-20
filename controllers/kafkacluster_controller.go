@@ -22,6 +22,7 @@ import (
 	"github.com/banzaicloud/k8s-objectmatcher/patch"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/k8sutil"
+	"github.com/banzaicloud/kafka-operator/pkg/pkiutil"
 	"github.com/banzaicloud/kafka-operator/pkg/resources"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/cruisecontrol"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/cruisecontrolmonitoring"
@@ -122,7 +123,7 @@ func (r *KafkaClusterReconciler) Reconcile(request ctrl.Request) (ctrl.Result, e
 					RequeueAfter: time.Duration(5) * time.Second,
 				}, nil
 			case errorfactory.CreateTopicError:
-				log.Info("Could not create CC topic, either less than 3 brokers or not all are ready")
+				log.Info("Could not create CC topic, are 3 brokers available?")
 				return ctrl.Result{
 					Requeue:      true,
 					RequeueAfter: time.Duration(15) * time.Second,
@@ -174,6 +175,21 @@ func (r *KafkaClusterReconciler) checkFinalizers(log logr.Logger, cluster *v1alp
 			if err = r.Client.Delete(context.TODO(), &user); err != nil {
 				return requeueWithError(log, "failed to delete kafkauser", err)
 			}
+		}
+	}
+
+	// Do any necessary PKI cleanup - a PKI backend should make sure any
+	// user finalizations are done before it does its final cleanup
+	if err = pkiutil.GetPKIManager(r.Client, cluster).FinalizePKI(log); err != nil {
+		switch err.(type) {
+		case errorfactory.ResourceNotReady:
+			log.Info("The PKI is not ready to be torn down")
+			return ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: time.Duration(5) * time.Second,
+			}, nil
+		default:
+			return requeueWithError(log, "failed to finalize PKI", err)
 		}
 	}
 

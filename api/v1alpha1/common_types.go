@@ -22,6 +22,8 @@ type CruiseControlTopicStatus string
 
 type KafkaAccessType string
 
+type PKIBackend string
+
 // GracefulActionState holds information about GracefulAction State
 type GracefulActionState struct {
 	// ErrorMessage holds the information what happened with CC
@@ -65,6 +67,13 @@ const (
 	// KafkaAccessTypeWrite states that a user wants produce access to a topic
 	KafkaAccessTypeWrite KafkaAccessType = "write"
 
+	// PKIBackendCertManager invokes cert-manager for user certificate management
+	PKIBackendCertManager PKIBackend = "cert-manager"
+	// PKIBackendVault invokves vault PKI for user certificate management
+	PKIBackendVault PKIBackend = "vault"
+
+	// TLSJKSKey is where a JKS is stored in a user secret when requested
+	TLSJKSKey string = "tls.jks"
 	// CoreCACertKey is where ca ceritificates are stored in user certificates
 	CoreCACertKey string = "ca.crt"
 	// CACertKey is the key where the CA certificate is stored in the operator secrets

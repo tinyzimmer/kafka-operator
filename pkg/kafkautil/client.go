@@ -43,7 +43,6 @@ type KafkaClient interface {
 
 	ResolveBrokerID(int32) string
 	DescribeCluster() ([]*sarama.Broker, error)
-	GetCA() (string, string)
 
 	Close() error
 }
@@ -54,6 +53,9 @@ type kafkaClient struct {
 	admin   sarama.ClusterAdmin
 	timeout time.Duration
 	brokers []*sarama.Broker
+
+	// newClusterAdmin for mocking
+	newClusterAdmin func([]string, *sarama.Config) (sarama.ClusterAdmin, error)
 }
 
 func New(opts *KafkaConfig) (client KafkaClient, err error) {
@@ -61,21 +63,29 @@ func New(opts *KafkaConfig) (client KafkaClient, err error) {
 		opts:    opts,
 		timeout: time.Duration(opts.OperationTimeout) * time.Second,
 	}
-
-	config := kclient.getSaramaConfig()
-
-	if kclient.admin, err = sarama.NewClusterAdmin([]string{opts.BrokerURI}, config); err != nil {
-		err = errorfactory.New(errorfactory.BrokersUnreachable{}, err, "could not connect to kafka brokers")
-		return
+	kclient.newClusterAdmin = sarama.NewClusterAdmin
+	if opts.openOnNew {
+		if err = kclient.Open(); err != nil {
+			return
+		}
 	}
-
-	if kclient.brokers, err = kclient.DescribeCluster(); err != nil {
-		kclient.admin.Close()
-		err = errorfactory.New(errorfactory.BrokersNotReady{}, err, "could not describe kafka cluster")
-		return
-	}
-
 	return kclient, nil
+}
+
+func (k *kafkaClient) Open() error {
+	var err error
+	config := k.getSaramaConfig()
+	if k.admin, err = k.newClusterAdmin([]string{k.opts.BrokerURI}, config); err != nil {
+		err = errorfactory.New(errorfactory.BrokersUnreachable{}, err, "could not connect to kafka brokers")
+		return err
+	}
+
+	if k.brokers, err = k.DescribeCluster(); err != nil {
+		k.admin.Close()
+		err = errorfactory.New(errorfactory.BrokersNotReady{}, err, "could not describe kafka cluster")
+		return err
+	}
+	return nil
 }
 
 func (k *kafkaClient) Close() error {

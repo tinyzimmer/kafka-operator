@@ -228,7 +228,7 @@ func (r *Reconciler) Reconcile(log logr.Logger) error {
 		if err != nil {
 			return emperror.WrapWith(err, "failed to get controller secret, maybe still creating...")
 		}
-		for _, key := range []string{"clientCert", "peerCert"} {
+		for _, key := range []string{banzaicloudv1alpha1.ClientCertKey, banzaicloudv1alpha1.PeerCertKey} {
 			su, err := certutil.DecodeCertificate(controllerSecret.Data[key])
 			if err != nil {
 				return emperror.WrapWith(err, "Failed to decode our client certificate")
