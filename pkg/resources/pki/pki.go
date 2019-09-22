@@ -15,7 +15,7 @@
 package pki
 
 import (
-	banzaicloudv1alpha1 "github.com/banzaicloud/kafka-operator/api/v1alpha1"
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/pkg/pkiutil"
 	"github.com/banzaicloud/kafka-operator/pkg/resources"
 	"github.com/go-logr/logr"
@@ -32,7 +32,7 @@ type Reconciler struct {
 }
 
 // New creates a new reconciler for a PKI
-func New(client client.Client, scheme *runtime.Scheme, cluster *banzaicloudv1alpha1.KafkaCluster) *Reconciler {
+func New(client client.Client, scheme *runtime.Scheme, cluster *v1alpha1.KafkaCluster) *Reconciler {
 	return &Reconciler{
 		Scheme: scheme,
 		Reconciler: resources.Reconciler{

@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strings"
 
-	banzaicloudv1alpha1 "github.com/banzaicloud/kafka-operator/api/v1alpha1"
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/pkg/certutil"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/pkiutil/pkicommon"
@@ -140,11 +140,11 @@ func (v *vaultPKI) ensureBootstrapSecrets(scheme *runtime.Scheme, brokerCert, co
 			certs := &corev1.Secret{
 				ObjectMeta: templates.ObjectMeta(v.cluster.Spec.ListenersConfig.SSLSecrets.TLSSecretName, pkicommon.LabelsForKafkaPKI(v.cluster.Name), v.cluster),
 				Data: map[string][]byte{
-					banzaicloudv1alpha1.CACertKey:           brokerCert.CA,
-					banzaicloudv1alpha1.PeerCertKey:         brokerCert.Certificate,
-					banzaicloudv1alpha1.PeerPrivateKeyKey:   brokerCert.Key,
-					banzaicloudv1alpha1.ClientCertKey:       controllerCert.Certificate,
-					banzaicloudv1alpha1.ClientPrivateKeyKey: controllerCert.Key,
+					v1alpha1.CACertKey:           brokerCert.CA,
+					v1alpha1.PeerCertKey:         brokerCert.Certificate,
+					v1alpha1.PeerPrivateKeyKey:   brokerCert.Key,
+					v1alpha1.ClientCertKey:       controllerCert.Certificate,
+					v1alpha1.ClientPrivateKeyKey: controllerCert.Key,
 				},
 			}
 			controllerutil.SetControllerReference(v.cluster, certs, scheme)
@@ -166,7 +166,7 @@ func (v *vaultPKI) ensureBootstrapSecrets(scheme *runtime.Scheme, brokerCert, co
 			passw := &corev1.Secret{
 				ObjectMeta: templates.ObjectMeta(v.cluster.Spec.ListenersConfig.SSLSecrets.JKSPasswordName, pkicommon.LabelsForKafkaPKI(v.cluster.Name), v.cluster),
 				Data: map[string][]byte{
-					banzaicloudv1alpha1.PasswordKey: certutil.GeneratePass(16),
+					v1alpha1.PasswordKey: certutil.GeneratePass(16),
 				},
 			}
 			controllerutil.SetControllerReference(v.cluster, passw, scheme)
@@ -203,10 +203,10 @@ func (v *vaultPKI) ensureBrokerCert(vault *vaultapi.Client, caCert string) (brok
 		user, err = vault.Logical().Write(
 			v.getIssuePath(),
 			map[string]interface{}{
-				"common_name":        pkicommon.GetCommonName(v.cluster),
-				"alt_names":          strings.Join(pkicommon.GetDNSNames(v.cluster), ","),
-				"ttl":                "60000h",
-				"private_key_format": "pkcs8",
+				vaultCommonNameArg:       pkicommon.GetCommonName(v.cluster),
+				vaultAltNamesArg:         strings.Join(pkicommon.GetDNSNames(v.cluster), ","),
+				vaultTTLArg:              "60000h",
+				vaultPrivateKeyFormatArg: "pkcs8",
 			},
 		)
 		if err != nil {
@@ -244,10 +244,10 @@ func (v *vaultPKI) ensureControllerCert(vault *vaultapi.Client, caCert string) (
 		user, err = vault.Logical().Write(
 			v.getIssuePath(),
 			map[string]interface{}{
-				"common_name":          fmt.Sprintf("%s-controller", v.cluster.Name),
-				"ttl":                  "60000h",
-				"private_key_format":   "pkcs8",
-				"exclude_cn_from_sans": true,
+				vaultCommonNameArg:        fmt.Sprintf("%s-controller", v.cluster.Name),
+				vaultTTLArg:               "60000h",
+				vaultPrivateKeyFormatArg:  "pkcs8",
+				vaultExcludeCNFromSANSArg: true,
 			},
 		)
 		if err != nil {
@@ -277,7 +277,7 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 	if err = vault.Sys().Mount(
 		caPath,
 		&vaultapi.MountInput{
-			Type: "pki",
+			Type: vaultBackendPKI,
 			Config: vaultapi.MountConfigInput{
 				MaxLeaseTTL: "219000h",
 			},
@@ -289,7 +289,7 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 	if err = vault.Sys().Mount(
 		intermediatePath,
 		&vaultapi.MountInput{
-			Type: "pki",
+			Type: vaultBackendPKI,
 			Config: vaultapi.MountConfigInput{
 				MaxLeaseTTL: "219000h",
 			},
@@ -301,7 +301,7 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 	if err = vault.Sys().Mount(
 		userPath,
 		&vaultapi.MountInput{
-			Type: "kv",
+			Type: vaultBackendKV,
 		},
 	); err != nil {
 		return errorfactory.New(errorfactory.VaultAPIFailure{}, err, "failed to setup kv mount for user certificate store")
@@ -311,10 +311,10 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 	_, err = vault.Logical().Write(
 		fmt.Sprintf("%s/root/generate/internal", caPath),
 		map[string]interface{}{
-			"common_name":          fmt.Sprintf(pkicommon.CAFQDNTemplate, v.cluster.Name, v.cluster.Namespace),
-			"ou":                   pkiOU,
-			"exclude_cn_from_sans": true,
-			"ttl":                  "215000h",
+			vaultCommonNameArg:        fmt.Sprintf(pkicommon.CAFQDNTemplate, v.cluster.Name, v.cluster.Namespace),
+			vaultOUArg:                pkiOU,
+			vaultExcludeCNFromSANSArg: true,
+			vaultTTLArg:               "215000h",
 		},
 	)
 	if err != nil {
@@ -325,8 +325,8 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 	_, err = vault.Logical().Write(
 		fmt.Sprintf("%s/config/urls", caPath),
 		map[string]interface{}{
-			"issuing_certificates":    fmt.Sprintf("%s/v1/%s/ca", vault.Address(), caPath),
-			"crl_distribution_points": fmt.Sprintf("%s/v1/%s/crl", vault.Address(), caPath),
+			vaultIssuingCertificates:   fmt.Sprintf("%s/v1/%s/ca", vault.Address(), caPath),
+			vaultCRLDistributionPoints: fmt.Sprintf("%s/v1/%s/crl", vault.Address(), caPath),
 		},
 	)
 	if err != nil {
@@ -337,10 +337,10 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 	csr, err := vault.Logical().Write(
 		fmt.Sprintf("%s/intermediate/generate/internal", intermediatePath),
 		map[string]interface{}{
-			"common_name":          fmt.Sprintf(pkicommon.CAIntermediateTemplate, v.cluster.Name, v.cluster.Namespace),
-			"ou":                   pkiOU,
-			"exclude_cn_from_sans": true,
-			"ttl":                  "209999h",
+			vaultCommonNameArg:        fmt.Sprintf(pkicommon.CAIntermediateTemplate, v.cluster.Name, v.cluster.Namespace),
+			vaultOUArg:                pkiOU,
+			vaultExcludeCNFromSANSArg: true,
+			vaultTTLArg:               "209999h",
 		},
 	)
 	if err != nil {
@@ -351,9 +351,9 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 	signedIntermediate, err := vault.Logical().Write(
 		fmt.Sprintf("%s/root/sign-intermediate", caPath),
 		map[string]interface{}{
-			"csr":    csr.Data["csr"],
-			"format": "pem_bundle",
-			"ttl":    "209999h",
+			vaultCSRArg:       csr.Data["csr"],
+			vaultCSRFormatArg: "pem_bundle",
+			vaultTTLArg:       "209999h",
 		},
 	)
 	if err != nil {
@@ -364,7 +364,7 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 	_, err = vault.Logical().Write(
 		fmt.Sprintf("%s/intermediate/set-signed", intermediatePath),
 		map[string]interface{}{
-			"certificate": signedIntermediate.Data["certificate"],
+			vaultCertificateKey: signedIntermediate.Data[vaultCertificateKey],
 		},
 	)
 	if err != nil {
@@ -375,8 +375,8 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 	_, err = vault.Logical().Write(
 		fmt.Sprintf("%s/config/urls", intermediatePath),
 		map[string]interface{}{
-			"issuing_certificates":    fmt.Sprintf("%s/v1/%s/ca", vault.Address(), intermediatePath),
-			"crl_distribution_points": fmt.Sprintf("%s/v1/%s/crl", vault.Address(), intermediatePath),
+			vaultIssuingCertificates:   fmt.Sprintf("%s/v1/%s/ca", vault.Address(), intermediatePath),
+			vaultCRLDistributionPoints: fmt.Sprintf("%s/v1/%s/crl", vault.Address(), intermediatePath),
 		},
 	)
 	if err != nil {
@@ -387,16 +387,16 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 	if _, err = vault.Logical().Write(
 		fmt.Sprintf("%s/roles/operator", intermediatePath),
 		map[string]interface{}{
-			"allow_localhost":     true,
-			"allowed_domains":     "*",
-			"allow_subdomains":    true,
-			"max_ttl":             "60000h",
-			"allow_any_name":      true,
-			"allow_ip_sans":       true,
-			"allow_glob_domains":  true,
-			"organization":        pkiOU,
-			"use_csr_common_name": false,
-			"use_csr_sans":        false,
+			vaultAllowLocalhost:   true,
+			vaultAllowedDomains:   "*",
+			vaultAllowSubdomains:  true,
+			vaultMaxTTL:           "60000h",
+			vaultAllowAnyName:     true,
+			vaultAllowIPSANS:      true,
+			vaultAllowGlobDomains: true,
+			vaultOrganization:     pkiOU,
+			vaultUseCSRCommonName: false,
+			vaultUseCSRSANS:       false,
 		},
 	); err != nil {
 		return errorfactory.New(errorfactory.VaultAPIFailure{}, err, "failed to create issuer role for intermediate pki")

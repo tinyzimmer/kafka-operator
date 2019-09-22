@@ -38,9 +38,11 @@ spec:
         - name: serving-cert
           secret:
             secretName: {{ include "kafka-operator.fullname" . }}-server-cert
-        - name: vault-keys
+      {{- if .Values.operator.vaultSecret }}
+        - name: {{ .Values.operator.vaultSecret }}
           secret:
-            secretName: vault-keys
+            secretName: {{ .Values.operator.vaultSecret }}
+      {{- end }}
       containers:
       {{- if and .Values.prometheusMetrics.enabled .Values.prometheusMetrics.authProxy.enabled }}
         - name: kube-rbac-proxy
@@ -67,15 +69,19 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+          {{- if .Values.operator.vaultAddress }}
             - name: VAULT_ADDR
-              value: https://vault.default.svc.cluster.local:8200
+              value: {{ .Values.operator.vaultAddress }}
+          {{- end }}
+          {{- if .Values.operator.vaultSecret }}
             - name: VAULT_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: vault-keys
+                  name: {{ .Values.operator.vaultSecret }}
                   key: vault.token
             - name: VAULT_CACERT
               value: /etc/vault/certs/ca.crt
+          {{- end }}
           ports:
             - containerPort: 443
               name: webhook-server
@@ -90,9 +96,11 @@ spec:
             - mountPath: /etc/webhook/certs
               name: serving-cert
               readOnly: true
+          {{- if .Values.operator.vaultSecret }}
             - mountPath: /etc/vault/certs
-              name: vault-keys
+              name: {{ .Values.operator.vaultSecret }}
               readOnly: true
+          {{- end }}
           resources:
 {{ toYaml .Values.operator.resources | nindent 12 }}
 {{- with .Values.nodeSelector }}

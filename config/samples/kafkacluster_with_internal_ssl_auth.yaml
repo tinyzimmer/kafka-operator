@@ -60,7 +60,7 @@ spec:
       tlsSecretName: "test-kafka-operator"
       jksPasswordName: "test-kafka-operator-pass"
       create: true
-      #pkiBackend: vault
+      pkiBackend: vault
   cruiseControlConfig:
     config: |
       # Configurations for the load monitor

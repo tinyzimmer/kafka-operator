@@ -186,7 +186,7 @@ func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Re
 	}
 
 	// ensure ACLs - CreateUserACLs returns no error if the ACLs already exist
-	// TODO: Should probably take this opportunity to see if we are removing any ACLs
+	// TODO (tinyzimmer): Should probably take this opportunity to see if we are removing any ACLs
 	for _, grant := range instance.Spec.TopicGrants {
 		reqLogger.Info(fmt.Sprintf("Ensuring %s ACLs for User: %s -> Topic: %s", grant.AccessType, user.DN(), grant.TopicName))
 		if err = broker.CreateUserACLs(grant.AccessType, user.DN(), grant.TopicName); err != nil {

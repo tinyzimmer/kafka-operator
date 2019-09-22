@@ -27,6 +27,43 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 )
 
+const (
+	vaultBackendPKI = "pki"
+	vaultBackendKV  = "kv"
+
+	// Fields in a vault PKI certificate
+	vaultCertificateKey  = "certificate"
+	vaultIntermediateKey = "issuing_ca"
+	vaultPrivateKeyKey   = "private_key"
+	vaultSerialNoKey     = "serial_number"
+
+	// Common arguments to vault certificates/issuers/configs
+	vaultCommonNameArg        = "common_name"
+	vaultAltNamesArg          = "alt_names"
+	vaultTTLArg               = "ttl"
+	vaultOUArg                = "ou"
+	vaultPrivateKeyFormatArg  = "private_key_format"
+	vaultExcludeCNFromSANSArg = "exclude_cn_from_sans"
+	vaultCSRArg               = "csr"
+	vaultCSRFormatArg         = "format"
+
+	// Arguments to issuer config
+	vaultIssuingCertificates   = "issuing_certificates"
+	vaultCRLDistributionPoints = "crl_distribution_points"
+
+	// Arguments to create issue role
+	vaultAllowLocalhost   = "allow_localhost"
+	vaultAllowedDomains   = "allowed_domains"
+	vaultAllowSubdomains  = "allow_subdomains"
+	vaultMaxTTL           = "max_ttl"
+	vaultAllowAnyName     = "allow_any_name"
+	vaultAllowIPSANS      = "allow_ip_sans"
+	vaultAllowGlobDomains = "allow_glob_domains"
+	vaultOrganization     = "organization"
+	vaultUseCSRCommonName = "use_csr_common_name"
+	vaultUseCSRSANS       = "use_csr_sans"
+)
+
 func getClient() (client *vaultapi.Client, err error) {
 	config := vaultapi.DefaultConfig()
 	if err = config.ReadEnvironment(); err != nil {
@@ -78,7 +115,7 @@ func (v *vaultPKI) getCA(vault *vaultapi.Client) (string, error) {
 		err = errorfactory.New(errorfactory.InternalError{}, err, "our CA has dissapeared!")
 		return "", err
 	}
-	caCert, ok := ca.Data["certificate"].(string)
+	caCert, ok := ca.Data[vaultCertificateKey].(string)
 	if !ok {
 		err = errorfactory.New(errorfactory.InternalError{}, err, "could not find certificate data in ca secret")
 		return "", err
@@ -87,12 +124,12 @@ func (v *vaultPKI) getCA(vault *vaultapi.Client) (string, error) {
 }
 
 func rawToBootstrapCertificate(data map[string]interface{}, caCert string) *pkicommon.UserCertificate {
-	intermediateCert, _ := data["issuing_ca"].(string)
+	intermediateCert, _ := data[vaultIntermediateKey].(string)
 	// bootstrap secret currently fails init if intermediate not included with CA
 	caChain := strings.Join([]string{caCert, intermediateCert}, "\n")
-	clientCert, _ := data["certificate"].(string)
-	clientKey, _ := data["private_key"].(string)
-	serial, _ := data["serial_number"].(string)
+	clientCert, _ := data[vaultCertificateKey].(string)
+	clientKey, _ := data[vaultPrivateKeyKey].(string)
+	serial, _ := data[vaultSerialNoKey].(string)
 
 	return &pkicommon.UserCertificate{
 		CA:          []byte(caChain),
@@ -104,11 +141,11 @@ func rawToBootstrapCertificate(data map[string]interface{}, caCert string) *pkic
 
 func rawToCertificate(data map[string]interface{}, caCert string) *pkicommon.UserCertificate {
 	// clients/users needs the intermediate included with client certificate instead of CA
-	intermediateCert, _ := data["issuing_ca"].(string)
-	clientCert, _ := data["certificate"].(string)
+	intermediateCert, _ := data[vaultIntermediateKey].(string)
+	clientCert, _ := data[vaultCertificateKey].(string)
 	clientBundle := strings.Join([]string{clientCert, intermediateCert}, "\n")
-	clientKey, _ := data["private_key"].(string)
-	serial, _ := data["serial_number"].(string)
+	clientKey, _ := data[vaultPrivateKeyKey].(string)
+	serial, _ := data[vaultSerialNoKey].(string)
 
 	return &pkicommon.UserCertificate{
 		CA:          []byte(caCert),

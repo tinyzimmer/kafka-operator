@@ -117,7 +117,7 @@ func (r *KafkaClusterReconciler) Reconcile(request ctrl.Request) (ctrl.Result, e
 					RequeueAfter: time.Duration(15) * time.Second,
 				}, nil
 			case errorfactory.ResourceNotReady:
-				log.Info("A new resource was not found, may not be ready")
+				log.Info("A new resource was not found or may not be ready")
 				return ctrl.Result{
 					Requeue:      true,
 					RequeueAfter: time.Duration(5) * time.Second,
@@ -132,6 +132,12 @@ func (r *KafkaClusterReconciler) Reconcile(request ctrl.Request) (ctrl.Result, e
 				return requeueWithError(log, err.Error(), err)
 			}
 		}
+	}
+
+	// Fetch the most recent cluster instance and ensure finalizer
+	instance = &v1alpha1.KafkaCluster{}
+	if err = r.Client.Get(context.TODO(), request.NamespacedName, instance); err != nil {
+		return requeueWithError(log, "failed to fetch updated kafkacluster instance", err)
 	}
 
 	log.Info("ensuring finalizer on kafkacluster")

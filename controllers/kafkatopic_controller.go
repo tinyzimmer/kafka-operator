@@ -205,6 +205,12 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 		return requeueWithError(reqLogger, "failed to update KafkaTopic", err)
 	}
 
+	// Fetch the updated object
+	instance = &v1alpha1.KafkaTopic{}
+	if err = r.Client.Get(context.TODO(), request.NamespacedName, instance); err != nil {
+		return requeueWithError(reqLogger, "failed to retrieve updated topic instance", err)
+	}
+
 	// Do an initial topic status sync
 	if _, err = r.doTopicStatusSync(reqLogger, cluster, instance); err != nil {
 		return requeueWithError(reqLogger, "failed to update KafkaTopic status", err)

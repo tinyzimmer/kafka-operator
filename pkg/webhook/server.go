@@ -17,6 +17,8 @@ package webhook
 import (
 	"net/http"
 
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
+	"github.com/banzaicloud/kafka-operator/pkg/kafkautil"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -32,18 +34,31 @@ type webhookServer struct {
 	client       client.Client
 	scheme       *runtime.Scheme
 	deserializer runtime.Decoder
+
+	// For mocking - use kafkautil.NewMockFromCluster
+	newKafkaFromCluster func(client.Client, *v1alpha1.KafkaCluster) (kafkautil.KafkaClient, error)
+}
+
+func newWebHookServer(client client.Client, scheme *runtime.Scheme) *webhookServer {
+	return &webhookServer{
+		client:              client,
+		scheme:              scheme,
+		deserializer:        serializer.NewCodecFactory(scheme).UniversalDeserializer(),
+		newKafkaFromCluster: kafkautil.NewFromCluster,
+	}
+}
+
+func newWebhookServerMux(client client.Client, scheme *runtime.Scheme) *http.ServeMux {
+	mux := http.NewServeMux()
+	webhookServer := newWebHookServer(client, scheme)
+	mux.HandleFunc("/validate", webhookServer.serve)
+	return mux
 }
 
 func SetupServerHandlers(mgr ctrl.Manager, certDir string) {
 	server := mgr.GetWebhookServer()
 	server.CertDir = certDir
-	mux := http.NewServeMux()
-	whsrv := &webhookServer{
-		client:       mgr.GetClient(),
-		scheme:       mgr.GetScheme(),
-		deserializer: serializer.NewCodecFactory(mgr.GetScheme()).UniversalDeserializer(),
-	}
-	mux.HandleFunc("/validate", whsrv.serve)
+	mux := newWebhookServerMux(mgr.GetClient(), mgr.GetScheme())
 	server.Register("/validate", mux)
 	return
 }

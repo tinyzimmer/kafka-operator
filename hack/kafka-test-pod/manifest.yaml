@@ -22,7 +22,7 @@ spec:
   clusterRef:
     name: kafka
     namespace: kafka
-  secretName: test-kafka-consumer
+  secretName: secret/test-kafka-consumer
   topicGrants:
     - topicName: test-topic
       accessType: read
@@ -36,7 +36,7 @@ spec:
   clusterRef:
     name: kafka
     namespace: kafka
-  secretName: test-kafka-producer
+  secretName: secret/test-kafka-producer
   topicGrants:
     - topicName: test-topic
       accessType: write
@@ -81,50 +81,50 @@ spec:
 #         - name: KAFKA_TLS_CA
 #           value: "vault:secret/data/test-kafka-producer#ca.crt"
 
----
-# A pod containing a producer and consumer using the above credentials
-apiVersion: v1
-kind: Pod
-metadata:
-  name: kafka-test-pod
-spec:
-
-  volumes:
-
-    # The consumer secret
-    - name: consumer-credentials
-      secret:
-        defaultMode: 420
-        secretName: test-kafka-consumer
-
-    # The producer secret
-    - name: producer-credentials
-      secret:
-        defaultMode: 420
-        secretName: test-kafka-producer
-
-  containers:
-
-    # Container reading from topic with the consumer credentials
-    - name: consumer
-      image: tinyzimmer/kafka-test:latest
-      imagePullPolicy: IfNotPresent
-      env:
-        - name: KAFKA_MODE
-          value: consumer
-      volumeMounts:
-        - mountPath: /etc/secrets/certs
-          name: consumer-credentials
-          readOnly: true
-
-    # Container writing to topic with the producer credentials
-    - name: producer
-      image: tinyzimmer/kafka-test:latest
-      imagePullPolicy: IfNotPresent
-      env:
-        - name: KAFKA_MODE
-          value: producer
-      volumeMounts:
-        - mountPath: /etc/secrets/certs
-          name: producer-credentials
-          readOnly: true
+# ---
+# # A pod containing a producer and consumer using the above credentials
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: kafka-test-pod
+# spec:
+#
+#   volumes:
+#
+#     # The consumer secret
+#     - name: consumer-credentials
+#       secret:
+#         defaultMode: 420
+#         secretName: test-kafka-consumer
+#
+#     # The producer secret
+#     - name: producer-credentials
+#       secret:
+#         defaultMode: 420
+#         secretName: test-kafka-producer
+#
+#   containers:
+#
+#     # Container reading from topic with the consumer credentials
+#     - name: consumer
+#       image: tinyzimmer/kafka-test:latest
+#       imagePullPolicy: IfNotPresent
+#       env:
+#         - name: KAFKA_MODE
+#           value: consumer
+#       volumeMounts:
+#         - mountPath: /etc/secrets/certs
+#           name: consumer-credentials
+#           readOnly: true
+#
+#     # Container writing to topic with the producer credentials
+#     - name: producer
+#       image: tinyzimmer/kafka-test:latest
+#       imagePullPolicy: IfNotPresent
+#       env:
+#         - name: KAFKA_MODE
+#           value: producer
+#       volumeMounts:
+#         - mountPath: /etc/secrets/certs
+#           name: producer-credentials
+#           readOnly: true

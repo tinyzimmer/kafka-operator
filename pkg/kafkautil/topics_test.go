@@ -35,16 +35,19 @@ func TestListTopics(t *testing.T) {
 
 func TestGetTopic(t *testing.T) {
 	client := newOpenedMockClient()
+
+	if topic, err := client.GetTopic("test-topic"); err != nil {
+		t.Error("Expected nil, got:", err)
+	} else if topic != nil {
+		t.Error("Expected nil got:", topic)
+	}
+
+	client.admin.CreateTopic("test-topic", &sarama.TopicDetail{}, false)
+
 	if topic, err := client.GetTopic("test-topic"); err != nil {
 		t.Error("Expected to get test-topic without error, got:", err)
 	} else if topic == nil {
 		t.Error("Expected to get empty details, got nil")
-	}
-
-	if topic, err := client.GetTopic("not-exists"); err != nil {
-		t.Error("Expected to get topic without error, got:", err)
-	} else if topic != nil {
-		t.Error("Expected nil for unfound topic, got:", topic)
 	}
 
 	client.admin, _ = newMockClusterAdminFailOps([]string{}, sarama.NewConfig())
@@ -66,6 +69,12 @@ func TestDescribeTopic(t *testing.T) {
 		t.Error("Expected error for bad topic, got nil")
 	}
 
+	if _, err := client.DescribeTopic("other"); err == nil {
+		t.Error("Expected error got nil")
+	} else if err.Error() != "not found" {
+		t.Error("Expected error not found, got:", err.Error())
+	}
+
 	client.admin, _ = newMockClusterAdminFailOps([]string{}, sarama.NewConfig())
 	if _, err := client.DescribeTopic("test-topic"); err == nil {
 		t.Error("Expected error on DescribeTopic, got nil")
@@ -75,7 +84,7 @@ func TestDescribeTopic(t *testing.T) {
 func TestCreateTopic(t *testing.T) {
 	client := newOpenedMockClient()
 	if err := client.CreateTopic(&CreateTopicOptions{
-		Name:              "test-topic",
+		Name:              "new-topic",
 		Partitions:        1,
 		ReplicationFactor: 1,
 	}); err != nil {
@@ -84,7 +93,7 @@ func TestCreateTopic(t *testing.T) {
 
 	client.admin, _ = newMockClusterAdminFailOps([]string{}, sarama.NewConfig())
 	if err := client.CreateTopic(&CreateTopicOptions{
-		Name:              "test-topic",
+		Name:              "new-topic",
 		Partitions:        1,
 		ReplicationFactor: 1,
 	}); err == nil {

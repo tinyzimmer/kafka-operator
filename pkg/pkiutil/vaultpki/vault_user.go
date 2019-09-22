@@ -15,6 +15,7 @@
 package vaultpki
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
@@ -101,7 +102,7 @@ func ensureVaultSecret(client *vaultapi.Client, userCert *pkicommon.UserCertific
 
 	if present != nil {
 		// "de-serialize" the existing vault secret
-		presentCert, err := userCertForData(present.Data)
+		presentCert, err := userCertForData(v2, present.Data)
 		if err != nil {
 			return errorfactory.New(errorfactory.InternalError{}, err, "could not parse stored user secret")
 		}
@@ -161,7 +162,13 @@ func dataForUserCert(cert *pkicommon.UserCertificate) map[string]interface{} {
 	return data
 }
 
-func userCertForData(data map[string]interface{}) (*pkicommon.UserCertificate, error) {
+func userCertForData(isV2 bool, data map[string]interface{}) (*pkicommon.UserCertificate, error) {
+	if isV2 {
+		var ok bool
+		if data, ok = data["data"].(map[string]interface{}); !ok {
+			return nil, errors.New("got v2 secret but could not parse data field")
+		}
+	}
 	cert := &pkicommon.UserCertificate{}
 	for _, key := range []string{corev1.TLSCertKey, corev1.TLSPrivateKeyKey, v1alpha1.CoreCACertKey} {
 		if _, ok := data[key]; !ok {
@@ -223,7 +230,7 @@ func (v *vaultPKI) FinalizeUserCertificate(user *v1alpha1.KafkaUser) (err error)
 	if _, err = client.Logical().Write(
 		fmt.Sprintf("%s/revoke", v.getIntermediatePath()),
 		map[string]interface{}{
-			"serial_number": userCert.Serial,
+			vaultSerialNoKey: userCert.Serial,
 		},
 	); err != nil {
 		return errorfactory.New(errorfactory.VaultAPIFailure{}, err, "failed to revoke user certificate")

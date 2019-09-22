@@ -9,6 +9,8 @@ operator:
     repository: banzaicloud/kafka-operator
     tag: 0.5.4
     pullPolicy: IfNotPresent
+  vaultAddress: ""
+  vaultSecret: ""
   resources:
     limits:
       cpu: 200m
