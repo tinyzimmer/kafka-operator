@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"time"
 
-	v1alpha1 "github.com/banzaicloud/kafka-operator/api/v1alpha1"
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/k8sutil"
 	"github.com/banzaicloud/kafka-operator/pkg/kafkautil"
@@ -43,7 +43,7 @@ import (
 var userFinalizer = "finalizer.kafkausers.banzaicloud.banzaicloud.io"
 
 func SetupKafkaUserWithManager(mgr ctrl.Manager) error {
-	// Create a new controller
+	// Create a new reconciler
 	r := &KafkaUserReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -63,7 +63,7 @@ func SetupKafkaUserWithManager(mgr ctrl.Manager) error {
 	}
 
 	// Watch for changes to secondary certificates and requeue the owner KafkaUser
-	// TODO: With supporting a second backend, we can reasonably allow the user to not
+	// TODO (tinyzimmer): With supporting a second backend, we can reasonably allow the user to not
 	// have cert-manager installed in the cluster - therefore we don't need to watch
 	err = c.Watch(&source.Kind{Type: &certv1.Certificate{}}, &handler.EnqueueRequestForOwner{
 		IsController: true,
@@ -96,9 +96,6 @@ type KafkaUserReconciler struct {
 
 // Reconcile reads that state of the cluster for a KafkaUser object and makes changes based on the state read
 // and what is in the KafkaUser.Spec
-// Note:
-// The Controller will requeue the Request to be processed again if the returned error is non-nil or
-// Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	reqLogger := r.Log.WithValues("kafkauser", request.NamespacedName, "Request.Name", request.Name)
 	reqLogger.Info("Reconciling KafkaUser")
@@ -162,6 +159,10 @@ func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Re
 	pkiManager := pkiutil.GetPKIManager(r.Client, cluster)
 
 	// Reconcile no matter what to get a user certificate instance for ACL management
+	// TODO (tinyzimmer): This can go wrong if the user made a mistake in their secret path
+	// using the vault backend, then tried to delete and fix it. Should probably
+	// have the PKIManager export a GetUserCertificate specifically for deletions
+	// that will allow the error to fall through if the certificate doesn't exist.
 	user, err := pkiManager.ReconcileUserCertificate(instance, r.Scheme)
 	if err != nil {
 		switch err.(type) {

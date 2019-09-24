@@ -17,7 +17,7 @@ package kafkautil
 import (
 	"testing"
 
-	v1alpha1 "github.com/banzaicloud/kafka-operator/api/v1alpha1"
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/pkg/pkiutil"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )

@@ -50,7 +50,6 @@ func newMockClusterAdminFailOps([]string, *sarama.Config) (sarama.ClusterAdmin, 
 func newMockOpts() *KafkaConfig {
 	return &KafkaConfig{
 		OperationTimeout: kafkaDefaultTimeout,
-		openOnNew:        false,
 	}
 }
 

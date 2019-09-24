@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/banzaicloud/k8s-objectmatcher/patch"
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/k8sutil"
 	"github.com/banzaicloud/kafka-operator/pkg/pkiutil"
@@ -41,9 +42,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-
-	banzaicloudv1alpha1 "github.com/banzaicloud/kafka-operator/api/v1alpha1"
-	v1alpha1 "github.com/banzaicloud/kafka-operator/api/v1alpha1"
 )
 
 var clusterFinalizer = "finalizer.kafkaclusters.banzaicloud.banzaicloud.io"
@@ -74,7 +72,7 @@ func (r *KafkaClusterReconciler) Reconcile(request ctrl.Request) (ctrl.Result, e
 	log := r.Log.WithValues("kafkacluster", request.NamespacedName, "Request.Name", request.Name)
 	log.Info("Reconciling KafkaCluster")
 	// Fetch the KafkaCluster instance
-	instance := &banzaicloudv1alpha1.KafkaCluster{}
+	instance := &v1alpha1.KafkaCluster{}
 	err := r.Get(context.TODO(), request.NamespacedName, instance)
 	if err != nil {
 		if apiErrors.IsNotFound(err) {
@@ -231,7 +229,7 @@ func belongsToCluster(ref v1alpha1.ClusterReference, cluster *v1alpha1.KafkaClus
 func SetupKafkaClusterWithManager(mgr ctrl.Manager, log logr.Logger) *ctrl.Builder {
 
 	builder := ctrl.NewControllerManagedBy(mgr).
-		For(&banzaicloudv1alpha1.KafkaCluster{})
+		For(&v1alpha1.KafkaCluster{})
 
 	kafkaWatches(builder)
 	envoyWatches(builder)
@@ -244,7 +242,7 @@ func SetupKafkaClusterWithManager(mgr ctrl.Manager, log logr.Logger) *ctrl.Build
 				if err != nil {
 					return false
 				}
-				if _, ok := object.(*banzaicloudv1alpha1.KafkaCluster); ok {
+				if _, ok := object.(*v1alpha1.KafkaCluster); ok {
 					return true
 				}
 				return false

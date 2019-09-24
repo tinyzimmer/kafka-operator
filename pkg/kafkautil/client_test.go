@@ -21,8 +21,8 @@ import (
 
 func TestNew(t *testing.T) {
 	opts := newMockOpts()
-	if _, err := New(opts); err != nil {
-		t.Error("Expected no error, got:", err)
+	if client := New(opts); client == nil {
+		t.Error("Expected new client, got nil")
 	}
 }
 
@@ -55,14 +55,6 @@ func TestNumBrokers(t *testing.T) {
 	client := newMockClient()
 	if client.NumBrokers() != 0 {
 		t.Error("Expected client with no brokers, got:", client.NumBrokers())
-	}
-}
-
-func TestResolveBrokerID(t *testing.T) {
-	client := newMockClient()
-	resolved := client.ResolveBrokerID(0)
-	if resolved != "0" {
-		t.Error("Expected 0 got:", resolved)
 	}
 }
 

@@ -15,7 +15,6 @@
 package kafkautil
 
 import (
-	"strconv"
 	"time"
 
 	"github.com/Shopify/sarama"
@@ -41,9 +40,10 @@ type KafkaClient interface {
 	CreateUserACLs(v1alpha1.KafkaAccessType, string, string) error
 	DeleteUserACLs(string) error
 
-	ResolveBrokerID(int32) string
+	Brokers() map[int32]string
 	DescribeCluster() ([]*sarama.Broker, error)
 
+	Open() error
 	Close() error
 }
 
@@ -58,18 +58,13 @@ type kafkaClient struct {
 	newClusterAdmin func([]string, *sarama.Config) (sarama.ClusterAdmin, error)
 }
 
-func New(opts *KafkaConfig) (client KafkaClient, err error) {
+func New(opts *KafkaConfig) KafkaClient {
 	kclient := &kafkaClient{
 		opts:    opts,
 		timeout: time.Duration(opts.OperationTimeout) * time.Second,
 	}
 	kclient.newClusterAdmin = sarama.NewClusterAdmin
-	if opts.openOnNew {
-		if err = kclient.Open(); err != nil {
-			return
-		}
-	}
-	return kclient, nil
+	return kclient
 }
 
 func (k *kafkaClient) Open() error {
@@ -93,22 +88,24 @@ func (k *kafkaClient) Close() error {
 }
 
 // NewFromCluster is a convenience wrapper around New() and ClusterConfig()
-func NewFromCluster(k8sclient client.Client, cluster *v1alpha1.KafkaCluster) (client KafkaClient, err error) {
+func NewFromCluster(k8sclient client.Client, cluster *v1alpha1.KafkaCluster) (KafkaClient, error) {
+	var client KafkaClient
+	var err error
 	opts, err := ClusterConfig(k8sclient, cluster)
 	if err != nil {
-		return
+		return nil, err
 	}
-	return New(opts)
+	client = New(opts)
+	err = client.Open()
+	return client, err
 }
 
-func (k *kafkaClient) ResolveBrokerID(ID int32) string {
+func (k *kafkaClient) Brokers() map[int32]string {
+	out := make(map[int32]string, 0)
 	for _, broker := range k.brokers {
-		if broker.ID() == ID {
-			return broker.Addr()
-		}
+		out[broker.ID()] = broker.Addr()
 	}
-	// fall back to leader ID
-	return strconv.Itoa(int(ID))
+	return out
 }
 
 func (k *kafkaClient) NumBrokers() int {

@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	"github.com/Shopify/sarama"
-	v1alpha1 "github.com/banzaicloud/kafka-operator/api/v1alpha1"
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 )
 
 func TestCreateUserACLs(t *testing.T) {

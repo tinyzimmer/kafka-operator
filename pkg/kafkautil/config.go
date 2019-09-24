@@ -18,7 +18,7 @@ import (
 	"crypto/tls"
 	"fmt"
 
-	v1alpha1 "github.com/banzaicloud/kafka-operator/api/v1alpha1"
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/pkg/pkiutil"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/kafka"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,9 +33,6 @@ type KafkaConfig struct {
 	TLSConfig *tls.Config
 
 	OperationTimeout int64
-
-	// dont open connection for testing
-	openOnNew bool
 }
 
 // ClusterConfig creates connection options from a KafkaCluster CR
@@ -52,7 +49,6 @@ func ClusterConfig(client client.Client, cluster *v1alpha1.KafkaCluster) (*Kafka
 		conf.UseSSL = true
 		conf.TLSConfig = tlsConfig
 	}
-	conf.openOnNew = true
 	return conf, nil
 }
 

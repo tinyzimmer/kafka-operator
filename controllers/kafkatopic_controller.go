@@ -17,10 +17,9 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
-	v1alpha1 "github.com/banzaicloud/kafka-operator/api/v1alpha1"
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/k8sutil"
 	"github.com/banzaicloud/kafka-operator/pkg/kafkautil"
@@ -100,10 +99,7 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 	}
 
 	// Get the referenced kafkacluster
-	clusterNamespace := instance.Spec.ClusterRef.Namespace
-	if clusterNamespace == "" {
-		clusterNamespace = instance.Namespace
-	}
+	clusterNamespace := getTopicClusterNamespace(instance)
 	var cluster *v1alpha1.KafkaCluster
 	if cluster, err = k8sutil.LookupKafkaCluster(r.Client, instance.Spec.ClusterRef.Name, clusterNamespace); err != nil {
 		// This shouldn't trigger anymore, but leaving it here as a safetybelt
@@ -159,16 +155,14 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 
 	// we got a topic back
 	if existing != nil {
-		// check if requesting a partition decrease, we can't do this
 		reqLogger.Info("Topic already exists, verifying configuration")
-
-		// Ensure partition count and topic configurations
+		// Ensure partition count
 		if changed, err := broker.EnsurePartitionCount(instance.Spec.Name, instance.Spec.Partitions); err != nil {
 			return requeueWithError(reqLogger, "failed to ensure topic partition count", err)
 		} else if changed {
 			reqLogger.Info("Increased partition count for topic")
 		}
-
+		// Ensure topic configurations
 		if err = broker.EnsureTopicConfig(instance.Spec.Name, util.MapStringStringPointer(instance.Spec.Config)); err != nil {
 			return requeueWithError(reqLogger, "failure to ensure topic config", err)
 		}
@@ -188,6 +182,7 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 
 	}
 
+	// set controller reference to parent cluster
 	if err = controllerutil.SetControllerReference(cluster, instance, r.Scheme); err != nil {
 		if !k8sutil.IsAlreadyOwnedError(err) {
 			return requeueWithError(reqLogger, "failed to set cluster controller reference on new KafkaTopic", err)
@@ -253,62 +248,41 @@ func (r *KafkaTopicReconciler) doTopicStatusSync(syncLogger logr.Logger, cluster
 			// return false to stop calling goroutine
 			return false, nil
 		}
-		// continue in case blip in api availability.
 		return true, err
 	}
 
+	// get topic status
+	status, err := r.getKafkaTopicStatus(cluster, topic)
+	if err != nil {
+		syncLogger.Error(err, "Failed to get current kafka topic status")
+		return true, err
+	}
+
+	// update status
+	updated := topic.DeepCopy()
+	updated.Status = *status
+	if err = r.Client.Status().Update(context.TODO(), updated); err != nil {
+		syncLogger.Error(err, "Failed to update KafkaTopic status")
+		return true, err
+	}
+	return true, nil
+}
+
+func (r *KafkaTopicReconciler) getKafkaTopicStatus(cluster *v1alpha1.KafkaCluster, topic *v1alpha1.KafkaTopic) (*v1alpha1.KafkaTopicStatus, error) {
 	// grab a connection to kafka
 	k, err := kafkautil.NewFromCluster(r.Client, cluster)
 	if err != nil {
-		syncLogger.Error(err, "Failed to get a broker connection to update topic status")
-		// let's still try again later, in case it was just a blip in cluster availability
-		return true, err
+		return nil, err
 	}
 	defer k.Close()
 
 	// get topic metadata
 	meta, err := k.DescribeTopic(topic.Spec.Name)
 	if err != nil {
-		syncLogger.Error(err, "Failed to describe topic to update its status")
-		return true, err
+		return nil, err
 	}
 
-	// iterate topic partitions and populate maps with their values
-	leaders := make(map[string]string, 0)
-	replicaCounts := make(map[string]string, 0)
-	isr := make(map[string]string, 0)
-	offlineReplicas := make(map[string]string, 0)
-
-	for _, part := range meta.Partitions {
-		ID := strconv.Itoa(int(part.ID))
-
-		leaders[ID] = fmt.Sprintf("%s/%s", strconv.Itoa(int(part.Leader)), k.ResolveBrokerID(part.Leader))
-		replicaCounts[ID] = strconv.Itoa(len(part.Replicas))
-
-		if len(part.Isr) > 0 {
-			isr[ID] = fmt.Sprintf("%+v", part.Isr)
-		}
-
-		if len(part.OfflineReplicas) > 0 {
-			offlineReplicas[ID] = fmt.Sprintf("%+v", part.OfflineReplicas)
-		}
-
-	}
-	// finally update status
-	updated := topic.DeepCopy()
-	updated.Status = v1alpha1.KafkaTopicStatus{
-		PartitionCount:  int32(len(meta.Partitions)),
-		Leaders:         leaders,
-		ReplicaCounts:   replicaCounts,
-		InSyncReplicas:  isr,
-		OfflineReplicas: offlineReplicas,
-	}
-	if err = r.Client.Status().Update(context.TODO(), updated); err != nil {
-		syncLogger.Error(err, "Failed to update KafkaTopic status")
-		return true, err
-	}
-	return true, nil
-
+	return kafkautil.TopicMetaToStatus(k.Brokers(), meta), nil
 }
 
 func (r *KafkaTopicReconciler) checkFinalizers(reqLogger logr.Logger, broker kafkautil.KafkaClient, topic *v1alpha1.KafkaTopic) (reconcile.Result, error) {
@@ -347,4 +321,12 @@ func (r *KafkaTopicReconciler) finalizeKafkaTopic(reqLogger logr.Logger, broker 
 func (r *KafkaTopicReconciler) addFinalizer(topic *v1alpha1.KafkaTopic) {
 	topic.SetFinalizers(append(topic.GetFinalizers(), topicFinalizer))
 	return
+}
+
+func getTopicClusterNamespace(topic *v1alpha1.KafkaTopic) string {
+	clusterNamespace := topic.Spec.ClusterRef.Namespace
+	if clusterNamespace == "" {
+		clusterNamespace = topic.Namespace
+	}
+	return clusterNamespace
 }
