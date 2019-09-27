@@ -15,6 +15,7 @@
 package kafkaclient
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Shopify/sarama"
@@ -54,6 +55,9 @@ func (k *kafkaClient) DescribeTopic(topic string) (meta *sarama.TopicMetadata, e
 	res, err := k.admin.DescribeTopics([]string{topic})
 	if err != nil {
 		return
+	}
+	if len(res) == 0 {
+		return nil, errors.New("not found")
 	}
 	if res[0].Err != sarama.ErrNoError {
 		err = res[0].Err

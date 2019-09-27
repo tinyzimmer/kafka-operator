@@ -16,29 +16,25 @@ package certutil
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
-	"math/rand"
+	"math/big"
+	mathrand "math/rand"
 	"strings"
 	"text/template"
 	"time"
 
-	logr "github.com/go-logr/logr"
+	v1alpha1 "github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	certv1 "github.com/jetstack/cert-manager/pkg/apis/certmanager/v1alpha1"
 	keystore "github.com/pavel-v-chernykh/keystore-go"
 	corev1 "k8s.io/api/core/v1"
 )
 
 const (
-	// TLSCAKey constant
-	TLSCAKey = "ca.crt"
-	// TLSJKSKey constant
-	TLSJKSKey = "tls.jks"
-	// TLSPasswordKey constant
-	TLSPasswordKey = "pass.txt"
-	// ClientPropertiesKey constant
 	ClientPropertiesKey = "client-ssl.properties"
 )
 
@@ -52,11 +48,12 @@ ssl.keystore.password={{ .Password }}
 ssl.key.password={{ .Password }}
 `
 
-// DecodeKey decodes pem key to []byte
+// DecodeKey will take a PEM encoded Private Key and convert to raw der bytes
 func DecodeKey(raw []byte) (parsedKey []byte, err error) {
 	block, _ := pem.Decode(raw)
 	if block == nil {
-		return nil, errors.New("failed to decode PEM block")
+		err = errors.New("failed to decode PEM data")
+		return
 	}
 	var keytype certv1.KeyEncoding
 	var key interface{}
@@ -77,48 +74,78 @@ func DecodeKey(raw []byte) (parsedKey []byte, err error) {
 	return
 }
 
-// DecodeCertificate decodes pem certs to golang x509.Certificate
+// DecodeCertificate returns an x509.Certificate for a PEM encoded certificate
 func DecodeCertificate(raw []byte) (cert *x509.Certificate, err error) {
 	block, _ := pem.Decode(raw)
 	if block == nil {
-		return nil, errors.New("failed to decode PEM block")
+		err = errors.New("Failed to decode x509 certificate from PEM")
+		return
 	}
 	cert, err = x509.ParseCertificate(block.Bytes)
 	return
 }
 
-// GeneratePass generates a password for keys, certs
+// GeneratePass generates a random password
 func GeneratePass(length int) (passw []byte) {
-	rand.Seed(time.Now().UnixNano())
+	mathrand.Seed(time.Now().UnixNano())
 	chars := []rune("ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
 		"abcdefghijklmnopqrstuvwxyz" +
 		"0123456789")
 	var b strings.Builder
 	for i := 0; i < length; i++ {
-		b.WriteRune(chars[rand.Intn(len(chars))])
+		b.WriteRune(chars[mathrand.Intn(len(chars))])
 	}
 	passw = []byte(b.String())
 	return
 }
 
-// InjectJKS injects JKS to kubernetes secrets
-func InjectJKS(reqLogger logr.Logger, secret *corev1.Secret) (injected *corev1.Secret, err error) {
+func EnsureSecretJKS(secret *corev1.Secret) (injected *corev1.Secret, err error) {
+
+	// If the JKS is already present - return
+	if _, ok := secret.Data[v1alpha1.TLSJKSKey]; ok {
+		return secret, nil
+	}
+
 	injected = secret.DeepCopy()
-	cert, err := DecodeCertificate(secret.Data[corev1.TLSCertKey])
+
+	jks, passw, err := GenerateJKS(
+		secret.Data[corev1.TLSCertKey],
+		secret.Data[corev1.TLSPrivateKeyKey],
+		secret.Data[v1alpha1.CoreCACertKey],
+	)
 	if err != nil {
-		reqLogger.Error(err, "Could not parse tls.crt from secret")
 		return
 	}
 
-	key, err := DecodeKey(secret.Data[corev1.TLSPrivateKeyKey])
+	var propsOut bytes.Buffer
+	t := template.Must(template.New("client-ssl.properties").Parse(clientPropertiesTemplate))
+	err = t.Execute(&propsOut, map[string]string{
+		"Password": string(passw),
+	})
 	if err != nil {
-		reqLogger.Error(err, "Could not parse tls.key from secret")
 		return
 	}
 
-	ca, err := DecodeCertificate(secret.Data[TLSCAKey])
+	injected.Data[v1alpha1.TLSJKSKey] = jks
+	injected.Data[v1alpha1.PasswordKey] = passw
+	injected.Data[ClientPropertiesKey] = propsOut.Bytes()
+	return
+}
+
+func GenerateJKS(clientCert, clientKey, clientCA []byte) (out, passw []byte, err error) {
+
+	cert, err := DecodeCertificate(clientCert)
 	if err != nil {
-		reqLogger.Error(err, "Could not parse ca.crt from secret")
+		return
+	}
+
+	key, err := DecodeKey(clientKey)
+	if err != nil {
+		return
+	}
+
+	ca, err := DecodeCertificate(clientCA)
+	if err != nil {
 		return
 	}
 
@@ -147,31 +174,51 @@ func InjectJKS(reqLogger logr.Logger, secret *corev1.Secret) (injected *corev1.S
 		},
 	}
 
-	var passw []byte
-	var ok bool
-	if passw, ok = secret.Data[TLSPasswordKey]; !ok {
-		passw = GeneratePass(16)
+	var outBuf bytes.Buffer
+	passw = GeneratePass(16)
+	err = keystore.Encode(&outBuf, jks, passw)
+	if err == nil {
+		out = outBuf.Bytes()
 	}
+	return
+}
 
-	var jksOut bytes.Buffer
-	err = keystore.Encode(&jksOut, jks, passw)
+// GenerateTestCert is used from unit tests for generating certificates
+func GenerateTestCert() (cert, key []byte, expectedDn string, err error) {
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
-		reqLogger.Error(err, "Could not encode chain to JKS")
 		return
 	}
-
-	var propsOut bytes.Buffer
-	t := template.Must(template.New("client-ssl.properties").Parse(clientPropertiesTemplate))
-	err = t.Execute(&propsOut, map[string]string{
-		"Password": string(passw),
-	})
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		reqLogger.Error(err, "Could not create properties template")
 		return
 	}
-
-	injected.Data[TLSJKSKey] = jksOut.Bytes()
-	injected.Data[TLSPasswordKey] = passw
-	injected.Data[ClientPropertiesKey] = propsOut.Bytes()
+	template := x509.Certificate{
+		SerialNumber:          serialNumber,
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		Subject: pkix.Name{
+			CommonName:   "test-cn",
+			Organization: []string{"test-ou"},
+		},
+	}
+	cert, err = x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return
+	}
+	buf := new(bytes.Buffer)
+	keyBuf := new(bytes.Buffer)
+	if err = pem.Encode(buf, &pem.Block{Type: "CERTIFICATE", Bytes: cert}); err != nil {
+		return
+	}
+	if err = pem.Encode(keyBuf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}); err != nil {
+		return
+	}
+	cert = buf.Bytes()
+	key = keyBuf.Bytes()
+	expectedDn = "CN=test-cn,O=test-ou"
 	return
 }

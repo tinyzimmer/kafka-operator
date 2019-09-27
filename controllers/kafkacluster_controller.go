@@ -24,6 +24,7 @@ import (
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/k8sutil"
+	pkimanager "github.com/banzaicloud/kafka-operator/pkg/pki"
 	"github.com/banzaicloud/kafka-operator/pkg/resources"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/cruisecontrol"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/cruisecontrolmonitoring"
@@ -124,13 +125,13 @@ func (r *KafkaClusterReconciler) Reconcile(request ctrl.Request) (ctrl.Result, e
 					RequeueAfter: time.Duration(15) * time.Second,
 				}, nil
 			case errorfactory.ResourceNotReady:
-				log.Info("A new resource was not found, may not be ready")
+				log.Info("A new resource was not found or may not be ready")
 				return ctrl.Result{
 					Requeue:      true,
 					RequeueAfter: time.Duration(5) * time.Second,
 				}, nil
 			case errorfactory.CreateTopicError:
-				log.Info("Could not create CC topic, either less than 3 brokers or not all are ready")
+				log.Info("Could not create CC topic, are 3 brokers available?")
 				return ctrl.Result{
 					Requeue:      true,
 					RequeueAfter: time.Duration(15) * time.Second,
@@ -145,6 +146,12 @@ func (r *KafkaClusterReconciler) Reconcile(request ctrl.Request) (ctrl.Result, e
 				return requeueWithError(log, err.Error(), err)
 			}
 		}
+	}
+
+	// Fetch the most recent cluster instance and ensure finalizer
+	instance = &v1beta1.KafkaCluster{}
+	if err = r.Client.Get(context.TODO(), request.NamespacedName, instance); err != nil {
+		return requeueWithError(log, "failed to fetch updated kafkacluster instance", err)
 	}
 
 	log.Info("ensuring finalizer on kafkacluster")
@@ -199,6 +206,21 @@ func (r *KafkaClusterReconciler) checkFinalizers(log logr.Logger, cluster *v1bet
 			if err = r.Client.Delete(context.TODO(), &user); err != nil {
 				return requeueWithError(log, "failed to delete kafkauser", err)
 			}
+		}
+	}
+
+	// Do any necessary PKI cleanup - a PKI backend should make sure any
+	// user finalizations are done before it does its final cleanup
+	if err = pkimanager.GetPKIManager(r.Client, cluster).FinalizePKI(log); err != nil {
+		switch err.(type) {
+		case errorfactory.ResourceNotReady:
+			log.Info("The PKI is not ready to be torn down")
+			return ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: time.Duration(5) * time.Second,
+			}, nil
+		default:
+			return requeueWithError(log, "failed to finalize PKI", err)
 		}
 	}
 
