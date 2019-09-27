@@ -88,8 +88,8 @@ func TestValidateTopic(t *testing.T) {
 	topic.Spec.ReplicationFactor = 2
 	if res = server.validateKafkaTopic(topic); res.Allowed {
 		t.Error("Expected not allowed due to replication factor larger than num brokers, got allowed")
-	} else if res.Result.Reason != metav1.StatusReasonInvalid {
-		t.Error("Expected invalid reason, got:", res.Result.Reason)
+	} else if res.Result.Reason != metav1.StatusReasonBadRequest {
+		t.Error("Expected bad request, got:", res.Result.Reason)
 	}
 
 	topic.Spec.ReplicationFactor = 1

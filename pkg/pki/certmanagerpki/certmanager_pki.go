@@ -35,6 +35,11 @@ import (
 )
 
 // FinalizePKI for cert-manager backend auto returns because controller references handle cleanup
+// TODO: (tinyzimmer) - This should probably delete certificates before other teardowns happen.
+// caught a race-condition:
+// - KafkaCluster deleted
+// - all children deleted
+// - secret deleted before certificate and certificate recreates secret before it gets deleted itself
 func (c *certManager) FinalizePKI(logger logr.Logger) error { return nil }
 
 func (c *certManager) ReconcilePKI(logger logr.Logger, scheme *runtime.Scheme) (err error) {

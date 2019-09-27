@@ -1,19 +1,21 @@
-apiVersion: banzaicloud.banzaicloud.io/v1alpha1
+apiVersion: kafka.banzaicloud.io/v1beta1
 kind: KafkaCluster
 metadata:
+  labels:
+    controller-tools.k8s.io: "1.0"
   name: kafka
 spec:
   headlessServiceEnabled: true
   zkAddresses:
     - "example-zookeepercluster-client.zookeeper:2181"
   oneBrokerPerNode: false
-  brokerConfigs:
-    - image: "wurstmeister/kafka:2.12-2.1.0"
-      id: 0
-      config: |
-        auto.create.topics.enable=false
-        authorizer.class.name=kafka.security.auth.SimpleAclAuthorizer
-        allow.everyone.if.no.acl.found=false
+  clusterImage: "wurstmeister/kafka:2.12-2.1.0"
+  readOnlyConfig: |
+    auto.create.topics.enable=false
+    authorizer.class.name=kafka.security.auth.SimpleAclAuthorizer
+    allow.everyone.if.no.acl.found=false
+  brokerConfigGroups:
+    default:
       storageConfigs:
         - mountPath: "/kafka-logs"
           pvcSpec:
@@ -22,34 +24,15 @@ spec:
             resources:
               requests:
                 storage: 10Gi
-    - image: "wurstmeister/kafka:2.12-2.1.0"
-      id: 1
-      config: |
-        auto.create.topics.enable=false
-        authorizer.class.name=kafka.security.auth.SimpleAclAuthorizer
-        allow.everyone.if.no.acl.found=false
-      storageConfigs:
-        - mountPath: "/kafka-logs"
-          pvcSpec:
-            accessModes:
-              - ReadWriteOnce
-            resources:
-              requests:
-                storage: 10Gi
-    - image: "wurstmeister/kafka:2.12-2.1.0"
-      id: 2
-      config: |
-        auto.create.topics.enable=false
-        authorizer.class.name=kafka.security.auth.SimpleAclAuthorizer
-        allow.everyone.if.no.acl.found=false
-      storageConfigs:
-        - mountPath: "/kafka-logs"
-          pvcSpec:
-            accessModes:
-              - ReadWriteOnce
-            resources:
-              requests:
-                storage: 10Gi
+  brokers:
+    - id: 0
+      brokerConfigGroup: "default"
+    - id: 1
+      brokerConfigGroup: "default"
+    - id: 2
+      brokerConfigGroup: "default"
+  rollingUpgradeConfig:
+    failureThreshold: 1
   listenersConfig:
     internalListeners:
       - type: "ssl"
@@ -60,9 +43,28 @@ spec:
       tlsSecretName: "test-kafka-operator"
       jksPasswordName: "test-kafka-operator-pass"
       create: true
-      pkiBackend: vault
+      #pkiBackend: vault
   cruiseControlConfig:
     config: |
+      # Copyright 2017 LinkedIn Corp. Licensed under the BSD 2-Clause License (the "License"). See License in the project root for license information.
+      #
+      # This is an example property file for Kafka Cruise Control. See KafkaCruiseControlConfig for more details.
+      # Configuration for the metadata client.
+      # =======================================
+      # The maximum interval in milliseconds between two metadata refreshes.
+      #metadata.max.age.ms=300000
+      # Client id for the Cruise Control. It is used for the metadata client.
+      #client.id=kafka-cruise-control
+      # The size of TCP send buffer bytes for the metadata client.
+      #send.buffer.bytes=131072
+      # The size of TCP receive buffer size for the metadata client.
+      #receive.buffer.bytes=131072
+      # The time to wait before disconnect an idle TCP connection.
+      #connections.max.idle.ms=540000
+      # The time to wait before reconnect to a given host.
+      #reconnect.backoff.ms=50
+      # The time to wait for a response from a host after sending a request.
+      #request.timeout.ms=30000
       # Configurations for the load monitor
       # =======================================
       # The number of metric fetcher thread to fetch metrics for the Kafka cluster
@@ -243,8 +245,7 @@ spec:
           }
         ]
       }
-    clusterConfigs: |
+    clusterConfig: |
       {
-        "min.insync.replicas": 2
+        "min.insync.replicas": 3
       }
-  serviceAccount: ""

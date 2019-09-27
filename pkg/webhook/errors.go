@@ -26,3 +26,10 @@ func IsAdmissionCantConnect(err error) bool {
 	}
 	return false
 }
+
+func IsInvalidReplicationFactor(err error) bool {
+	if apierrors.IsBadRequest(err) && strings.Contains(err.Error(), invalidReplicationFactorErrMsg) {
+		return true
+	}
+	return false
+}

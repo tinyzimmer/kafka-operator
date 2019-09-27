@@ -37,3 +37,21 @@ func TestIsAdmissionConnectionError(t *testing.T) {
 		t.Error("Expected is connection error to be false, got true")
 	}
 }
+
+func TestIsInvalidReplicationFactor(t *testing.T) {
+	err := apierrors.NewBadRequest(invalidReplicationFactorErrMsg)
+
+	if !IsInvalidReplicationFactor(err) {
+		t.Error("Expected is invalid replication error to be true, got false")
+	}
+
+	err = apierrors.NewServiceUnavailable("some other reason")
+	if IsInvalidReplicationFactor(err) {
+		t.Error("Expected is invalid replication error to be false, got true")
+	}
+
+	err = apierrors.NewServiceUnavailable(invalidReplicationFactorErrMsg)
+	if IsInvalidReplicationFactor(err) {
+		t.Error("Expected is invalid replication error to be false, got true")
+	}
+}

@@ -15,6 +15,7 @@
 package controllers
 
 import (
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -27,4 +28,12 @@ func requeueWithError(logger logr.Logger, msg string, err error) (ctrl.Result, e
 
 func reconciled() (ctrl.Result, error) {
 	return ctrl.Result{}, nil
+}
+
+func getClusterRefNamespace(ns string, ref v1alpha1.ClusterReference) string {
+	clusterNamespace := ref.Namespace
+	if clusterNamespace == "" {
+		return ns
+	}
+	return clusterNamespace
 }

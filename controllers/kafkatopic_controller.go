@@ -102,7 +102,7 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 	}
 
 	// Get the referenced kafkacluster
-	clusterNamespace := getTopicClusterNamespace(instance)
+	clusterNamespace := getClusterRefNamespace(instance.Namespace, instance.Spec.ClusterRef)
 	var cluster *v1beta1.KafkaCluster
 	if cluster, err = k8sutil.LookupKafkaCluster(r.Client, instance.Spec.ClusterRef.Name, clusterNamespace); err != nil {
 		// This shouldn't trigger anymore, but leaving it here as a safetybelt
@@ -195,7 +195,7 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 	// ensure a finalizer for cleanup on deletion
 	if !util.StringSliceContains(instance.GetFinalizers(), topicFinalizer) {
 		reqLogger.Info("Adding Finalizer for the KafkaTopic")
-		r.addFinalizer(instance)
+		instance.SetFinalizers(append(instance.GetFinalizers(), topicFinalizer))
 	}
 
 	// push any changes
@@ -319,17 +319,4 @@ func (r *KafkaTopicReconciler) finalizeKafkaTopic(reqLogger logr.Logger, broker 
 		reqLogger.Info("Deleted topic")
 	}
 	return nil
-}
-
-func (r *KafkaTopicReconciler) addFinalizer(topic *v1alpha1.KafkaTopic) {
-	topic.SetFinalizers(append(topic.GetFinalizers(), topicFinalizer))
-	return
-}
-
-func getTopicClusterNamespace(topic *v1alpha1.KafkaTopic) string {
-	clusterNamespace := topic.Spec.ClusterRef.Namespace
-	if clusterNamespace == "" {
-		clusterNamespace = topic.Namespace
-	}
-	return clusterNamespace
 }

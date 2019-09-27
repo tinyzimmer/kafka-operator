@@ -29,7 +29,8 @@ import (
 )
 
 const (
-	cantConnectErrorMsg = "Failed to connect to kafka cluster"
+	cantConnectErrorMsg            = "Failed to connect to kafka cluster"
+	invalidReplicationFactorErrMsg = "Replication factor is larger than the number of nodes in the kafka cluster"
 )
 
 func (s *webhookServer) validateKafkaTopic(topic *v1alpha1.KafkaTopic) (res *admissionv1beta1.AdmissionResponse) {
@@ -119,7 +120,7 @@ func (s *webhookServer) validateKafkaTopic(topic *v1alpha1.KafkaTopic) (res *adm
 		// check if requesting a replication factor larger than the broker size
 		if int(topic.Spec.ReplicationFactor) > broker.NumBrokers() {
 			log.Info(fmt.Sprintf("Spec is requesting replication factor of %v, larger than cluster size of %v", topic.Spec.ReplicationFactor, broker.NumBrokers()))
-			return notAllowed("Replication factor is larger than the number of nodes in the kafka cluster", metav1.StatusReasonInvalid)
+			return notAllowed(invalidReplicationFactorErrMsg, metav1.StatusReasonBadRequest)
 		}
 	}
 

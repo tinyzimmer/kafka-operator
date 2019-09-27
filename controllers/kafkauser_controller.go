@@ -114,10 +114,7 @@ func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Re
 	}
 
 	// Get the referenced kafkacluster
-	clusterNamespace := instance.Spec.ClusterRef.Namespace
-	if clusterNamespace == "" {
-		clusterNamespace = instance.Namespace
-	}
+	clusterNamespace := getClusterRefNamespace(instance.Namespace, instance.Spec.ClusterRef)
 	var cluster *v1beta1.KafkaCluster
 	if cluster, err = k8sutil.LookupKafkaCluster(r.Client, instance.Spec.ClusterRef.Name, clusterNamespace); err != nil {
 		// This shouldn't trigger anymore, but leaving it here as a safetybelt

@@ -70,6 +70,9 @@ func generateCCTopic(cluster *v1beta1.KafkaCluster, client client.Client, log lo
 				if webhook.IsAdmissionCantConnect(err) {
 					return errorfactory.New(errorfactory.ResourceNotReady{}, err, "topic admission failed to connect to kafka cluster")
 				}
+				if webhook.IsInvalidReplicationFactor(err) {
+					return errorfactory.New(errorfactory.ResourceNotReady{}, err, "not enough brokers available (at least three needed) for CC topic")
+				}
 				return errorfactory.New(errorfactory.APIFailure{}, err, "could not create cruise control topic")
 			}
 

@@ -15,6 +15,7 @@
 package certmanagerpki
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -22,7 +23,9 @@ import (
 	"github.com/go-logr/logr"
 	certv1 "github.com/jetstack/cert-manager/pkg/apis/certmanager/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -45,18 +48,50 @@ func reconcile(log logr.Logger, client client.Client, object runtime.Object, clu
 	}
 }
 
-func reconcileClusterIssuer(log logr.Logger, client client.Client, clusterIssuer *certv1.ClusterIssuer, cluster *v1beta1.KafkaCluster) (err error) {
-	return
+func reconcileClusterIssuer(log logr.Logger, client client.Client, clusterIssuer *certv1.ClusterIssuer, cluster *v1beta1.KafkaCluster) error {
+	obj := &certv1.ClusterIssuer{}
+	var err error
+	if err = client.Get(context.TODO(), types.NamespacedName{Name: clusterIssuer.Name, Namespace: clusterIssuer.Namespace}, obj); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		return client.Create(context.TODO(), clusterIssuer)
+	}
+	return nil
 }
 
-func reconcileIssuer(log logr.Logger, client client.Client, issuer *certv1.Issuer, cluster *v1beta1.KafkaCluster) (err error) {
-	return
+func reconcileIssuer(log logr.Logger, client client.Client, issuer *certv1.Issuer, cluster *v1beta1.KafkaCluster) error {
+	obj := &certv1.Issuer{}
+	var err error
+	if err = client.Get(context.TODO(), types.NamespacedName{Name: issuer.Name, Namespace: issuer.Namespace}, obj); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		return client.Create(context.TODO(), issuer)
+	}
+	return nil
 }
 
-func reconcileCertificate(log logr.Logger, client client.Client, cert *certv1.Certificate, cluster *v1beta1.KafkaCluster) (err error) {
-	return
+func reconcileCertificate(log logr.Logger, client client.Client, cert *certv1.Certificate, cluster *v1beta1.KafkaCluster) error {
+	obj := &certv1.Certificate{}
+	var err error
+	if err = client.Get(context.TODO(), types.NamespacedName{Name: cert.Name, Namespace: cert.Namespace}, obj); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		return client.Create(context.TODO(), cert)
+	}
+	return nil
 }
 
-func reconcileSecret(log logr.Logger, client client.Client, secret *corev1.Secret, cluster *v1beta1.KafkaCluster) (err error) {
-	return
+func reconcileSecret(log logr.Logger, client client.Client, secret *corev1.Secret, cluster *v1beta1.KafkaCluster) error {
+	obj := &corev1.Secret{}
+	var err error
+	if err = client.Get(context.TODO(), types.NamespacedName{Name: secret.Name, Namespace: secret.Namespace}, obj); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		return client.Create(context.TODO(), secret)
+	}
+	return nil
 }

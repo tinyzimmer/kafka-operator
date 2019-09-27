@@ -31,6 +31,7 @@ import (
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/k8sutil"
 	"github.com/banzaicloud/kafka-operator/pkg/kafkaclient"
+	"github.com/banzaicloud/kafka-operator/pkg/pki"
 	"github.com/banzaicloud/kafka-operator/pkg/resources"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/templates"
 	"github.com/banzaicloud/kafka-operator/pkg/scale"
@@ -39,6 +40,7 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -62,6 +64,7 @@ const (
 // Reconciler implements the Component Reconciler
 type Reconciler struct {
 	resources.Reconciler
+	Scheme *runtime.Scheme
 }
 
 // labelsForKafka returns the labels for selecting the resources
@@ -71,8 +74,9 @@ func labelsForKafka(name string) map[string]string {
 }
 
 // New creates a new reconciler for Kafka
-func New(client client.Client, cluster *v1beta1.KafkaCluster) *Reconciler {
+func New(client client.Client, scheme *runtime.Scheme, cluster *v1beta1.KafkaCluster) *Reconciler {
 	return &Reconciler{
+		Scheme: scheme,
 		Reconciler: resources.Reconciler{
 			Client:       client,
 			KafkaCluster: cluster,
@@ -211,6 +215,12 @@ func (r *Reconciler) Reconcile(log logr.Logger) error {
 	// That way we can continue to manage topics and users
 	superUsers := make([]string, 0)
 	if r.KafkaCluster.Spec.ListenersConfig.SSLSecrets != nil {
+
+		// reconcile the PKI
+		if err := pki.GetPKIManager(r.Client, r.KafkaCluster).ReconcilePKI(log, r.Scheme); err != nil {
+			return err
+		}
+
 		controllerSecret := &corev1.Secret{}
 		err = r.Client.Get(context.TODO(), types.NamespacedName{
 			Name:      r.KafkaCluster.Spec.ListenersConfig.SSLSecrets.TLSSecretName,

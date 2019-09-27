@@ -24,14 +24,13 @@ import (
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/k8sutil"
-	pkimanager "github.com/banzaicloud/kafka-operator/pkg/pki"
+	"github.com/banzaicloud/kafka-operator/pkg/pki"
 	"github.com/banzaicloud/kafka-operator/pkg/resources"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/cruisecontrol"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/cruisecontrolmonitoring"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/envoy"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/kafka"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/kafkamonitoring"
-	"github.com/banzaicloud/kafka-operator/pkg/resources/pki"
 	"github.com/banzaicloud/kafka-operator/pkg/util"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -100,11 +99,10 @@ func (r *KafkaClusterReconciler) Reconcile(request ctrl.Request) (ctrl.Result, e
 	}
 
 	reconcilers := []resources.ComponentReconciler{
-		pki.New(r.Client, r.Scheme, instance),
 		envoy.New(r.Client, instance),
 		kafkamonitoring.New(r.Client, instance),
 		cruisecontrolmonitoring.New(r.Client, instance),
-		kafka.New(r.Client, instance),
+		kafka.New(r.Client, r.Scheme, instance),
 		cruisecontrol.New(r.Client, instance),
 	}
 
@@ -126,15 +124,10 @@ func (r *KafkaClusterReconciler) Reconcile(request ctrl.Request) (ctrl.Result, e
 				}, nil
 			case errorfactory.ResourceNotReady:
 				log.Info("A new resource was not found or may not be ready")
+				log.Info(err.Error())
 				return ctrl.Result{
 					Requeue:      true,
-					RequeueAfter: time.Duration(5) * time.Second,
-				}, nil
-			case errorfactory.CreateTopicError:
-				log.Info("Could not create CC topic, are 3 brokers available?")
-				return ctrl.Result{
-					Requeue:      true,
-					RequeueAfter: time.Duration(15) * time.Second,
+					RequeueAfter: time.Duration(7) * time.Second,
 				}, nil
 			case errorfactory.ReconcileRollingUpgrade:
 				log.Info("Rolling Upgrade in Progress")
@@ -211,7 +204,7 @@ func (r *KafkaClusterReconciler) checkFinalizers(log logr.Logger, cluster *v1bet
 
 	// Do any necessary PKI cleanup - a PKI backend should make sure any
 	// user finalizations are done before it does its final cleanup
-	if err = pkimanager.GetPKIManager(r.Client, cluster).FinalizePKI(log); err != nil {
+	if err = pki.GetPKIManager(r.Client, cluster).FinalizePKI(log); err != nil {
 		switch err.(type) {
 		case errorfactory.ResourceNotReady:
 			log.Info("The PKI is not ready to be torn down")
