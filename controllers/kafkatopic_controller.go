@@ -145,6 +145,7 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 			return requeueWithError(reqLogger, err.Error(), err)
 		}
 	}
+
 	defer func() {
 		if err = broker.Close(); err != nil {
 			reqLogger.Error(err, "Error closing kafka connection")
