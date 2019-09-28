@@ -62,7 +62,7 @@ func (c *certManager) FinalizePKI(logger logr.Logger) error {
 				}
 			}
 
-			// Might as well delete the secret and leave the controller reference
+			// Might as well delete the secret and leave the controller reference earlier
 			// as a safety belt
 			secret := &corev1.Secret{}
 			if err := c.client.Get(context.TODO(), obj, secret); err != nil {
@@ -115,34 +115,26 @@ func (c *certManager) ReconcilePKI(logger logr.Logger, scheme *runtime.Scheme) (
 			}
 		}
 
-		// Grab ownership of all secrets we created through cert-manager
-		secretNames := []types.NamespacedName{
-			{Name: fmt.Sprintf(pkicommon.BrokerCACertTemplate, c.cluster.Name), Namespace: "cert-manager"},
-			{Name: fmt.Sprintf(pkicommon.BrokerServerCertTemplate, c.cluster.Name), Namespace: c.cluster.Namespace},
-			{Name: fmt.Sprintf(pkicommon.BrokerControllerTemplate, c.cluster.Name), Namespace: c.cluster.Namespace},
+		// Grab ownership of CA secret for garbage collection
+		secret := &corev1.Secret{}
+		if err := c.client.Get(context.TODO(), types.NamespacedName{
+			Name:      fmt.Sprintf(pkicommon.BrokerCACertTemplate, c.cluster.Name),
+			Namespace: "cert-manager",
+		}, secret); err != nil {
+			if apierrors.IsNotFound(err) {
+				return errorfactory.New(errorfactory.ResourceNotReady{}, err, "pki secret not ready")
+			}
+			return errorfactory.New(errorfactory.APIFailure{}, err, "could not fetch pki secret")
 		}
-
-		for _, o := range secretNames {
-			secret := &corev1.Secret{}
-			if err := c.client.Get(context.TODO(), o, secret); err != nil {
-				if apierrors.IsNotFound(err) {
-					return errorfactory.New(errorfactory.ResourceNotReady{}, err, "pki secret not ready")
-				}
-				return errorfactory.New(errorfactory.APIFailure{}, err, "could not fetch pki secret")
+		if err := controllerutil.SetControllerReference(c.cluster, secret, scheme); err != nil {
+			if k8sutil.IsAlreadyOwnedError(err) {
+				return nil
+			} else {
+				return errorfactory.New(errorfactory.InternalError{}, err, "failed to set controller reference on secret")
 			}
-
-			if err := controllerutil.SetControllerReference(c.cluster, secret, scheme); err != nil {
-				if k8sutil.IsAlreadyOwnedError(err) {
-					continue
-				} else {
-					return errorfactory.New(errorfactory.InternalError{}, err, "failed to set controller reference on secret")
-				}
-			}
-
-			if err := c.client.Update(context.TODO(), secret); err != nil {
-				return errorfactory.New(errorfactory.APIFailure{}, err, "failed to set controller reference on secret")
-			}
-
+		}
+		if err := c.client.Update(context.TODO(), secret); err != nil {
+			return errorfactory.New(errorfactory.APIFailure{}, err, "failed to set controller reference on secret")
 		}
 
 	}
@@ -198,38 +190,33 @@ func (c *certManager) kafkapki(scheme *runtime.Scheme) ([]runtime.Object, error)
 		}
 		controllerutil.SetControllerReference(c.cluster, clusterissuer, scheme)
 
-		// The broker certificates
-		brokerCert := &certv1.Certificate{
-			ObjectMeta: templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerServerCertTemplate, c.cluster.Name), pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster),
-			Spec: certv1.CertificateSpec{
-				SecretName:  fmt.Sprintf(pkicommon.BrokerServerCertTemplate, c.cluster.Name),
-				KeyEncoding: certv1.PKCS8,
-				CommonName:  pkicommon.GetCommonName(c.cluster),
-				DNSNames:    pkicommon.GetDNSNames(c.cluster),
-				IssuerRef: certv1.ObjectReference{
-					Name: fmt.Sprintf(pkicommon.BrokerIssuerTemplate, c.cluster.Name),
-					Kind: "ClusterIssuer",
+		// Broker "user"
+		brokerUser := &v1alpha1.KafkaUser{
+			ObjectMeta: templates.ObjectMeta(pkicommon.GetCommonName(c.cluster), pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster),
+			Spec: v1alpha1.KafkaUserSpec{
+				SecretName: fmt.Sprintf(pkicommon.BrokerServerCertTemplate, c.cluster.Name),
+				DNSNames:   pkicommon.GetDNSNames(c.cluster),
+				IncludeJKS: true,
+				ClusterRef: v1alpha1.ClusterReference{
+					Name:      c.cluster.Name,
+					Namespace: c.cluster.Namespace,
 				},
 			},
 		}
-		controllerutil.SetControllerReference(c.cluster, brokerCert, scheme)
 
-		// And finally one for us so we can manage topics/users
-		controllerCert := &certv1.Certificate{
+		// Controller/Cruise-Control user for the cluster
+		controllerUser := &v1alpha1.KafkaUser{
 			ObjectMeta: templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerControllerTemplate, c.cluster.Name), pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster),
-			Spec: certv1.CertificateSpec{
-				SecretName:  fmt.Sprintf(pkicommon.BrokerControllerTemplate, c.cluster.Name),
-				KeyEncoding: certv1.PKCS8,
-				CommonName:  fmt.Sprintf("%s-controller", c.cluster.Name),
-				IssuerRef: certv1.ObjectReference{
-					Name: fmt.Sprintf(pkicommon.BrokerIssuerTemplate, c.cluster.Name),
-					Kind: "ClusterIssuer",
+			Spec: v1alpha1.KafkaUserSpec{
+				SecretName: fmt.Sprintf(pkicommon.BrokerControllerTemplate, c.cluster.Name),
+				ClusterRef: v1alpha1.ClusterReference{
+					Name:      c.cluster.Name,
+					Namespace: c.cluster.Namespace,
 				},
 			},
 		}
-		controllerutil.SetControllerReference(c.cluster, controllerCert, scheme)
 
-		return []runtime.Object{selfsigner, ca, clusterissuer, brokerCert, controllerCert}, nil
+		return []runtime.Object{selfsigner, ca, clusterissuer, brokerUser, controllerUser}, nil
 
 	}
 
