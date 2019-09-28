@@ -20,8 +20,8 @@ import (
 	"testing"
 
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
-	"github.com/banzaicloud/kafka-operator/pkg/certutil"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
+	certutil "github.com/banzaicloud/kafka-operator/pkg/util/cert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 )

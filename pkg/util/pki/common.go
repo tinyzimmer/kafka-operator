@@ -20,7 +20,7 @@ import (
 
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
-	"github.com/banzaicloud/kafka-operator/pkg/certutil"
+	certutil "github.com/banzaicloud/kafka-operator/pkg/util/cert"
 	"github.com/banzaicloud/kafka-operator/pkg/util/kafka"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"

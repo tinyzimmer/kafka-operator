@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
-	"github.com/banzaicloud/kafka-operator/pkg/certutil"
+	certutil "github.com/banzaicloud/kafka-operator/pkg/util/cert"
 )
 
 func TestDN(t *testing.T) {
