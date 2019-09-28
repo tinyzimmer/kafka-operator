@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// Used for mocking during testing
+// MockBackend is used for mocking during testing
 var MockBackend = v1beta1.PKIBackend("mock")
 
 // GetPKIManager returns a PKI/User manager interface for a given cluster
@@ -38,7 +38,7 @@ func GetPKIManager(client client.Client, cluster *v1beta1.KafkaCluster) pkicommo
 	case v1beta1.PKIBackendCertManager:
 		return certmanagerpki.New(client, cluster)
 
-		// Use vault for pki backend
+	// Use vault for pki backend
 	case v1beta1.PKIBackendVault:
 		return vaultpki.New(client, cluster)
 

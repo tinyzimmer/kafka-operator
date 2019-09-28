@@ -112,7 +112,7 @@ func (v *vaultPKI) getCA(vault *vaultapi.Client) (string, error) {
 		return "", err
 	}
 	if ca == nil {
-		err = errorfactory.New(errorfactory.InternalError{}, err, "our CA has dissapeared!")
+		err = errorfactory.New(errorfactory.InternalError{}, err, "our CA has dissappeared!")
 		return "", err
 	}
 	caCert, ok := ca.Data[vaultCertificateKey].(string)

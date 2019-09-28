@@ -51,7 +51,7 @@ func TestGetControllerTLSConfig(t *testing.T) {
 
 	manager = newMock(newMockCluster())
 
-	// Test non-existant controller secret
+	// Test non-existent controller secret
 	if _, err := manager.GetControllerTLSConfig(); err == nil {
 		t.Error("Expected error got nil")
 	} else if reflect.TypeOf(err) != reflect.TypeOf(errorfactory.ResourceNotReady{}) {

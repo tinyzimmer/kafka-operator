@@ -38,7 +38,7 @@ func newMockCluster() *v1beta1.KafkaCluster {
 	cluster.Spec = v1beta1.KafkaClusterSpec{}
 	cluster.Spec.ListenersConfig = v1beta1.ListenersConfig{}
 	cluster.Spec.ListenersConfig.InternalListeners = []v1beta1.InternalListenerConfig{
-		v1beta1.InternalListenerConfig{ContainerPort: 80},
+		{ContainerPort: 80},
 	}
 	cluster.Spec.ListenersConfig.SSLSecrets = &v1beta1.SSLSecrets{
 		PKIBackend: MockBackend,

@@ -37,11 +37,11 @@ func (c *certManager) FinalizeUserCertificate(user *v1alpha1.KafkaUser) (err err
 
 func (c *certManager) ReconcileUserCertificate(user *v1alpha1.KafkaUser, scheme *runtime.Scheme) (userCert *pkicommon.UserCertificate, err error) {
 	// See if we have an existing certificate for this user already
-	cert, err := c.getUserCertificate(user)
+	_, err = c.getUserCertificate(user)
 
 	if err != nil && apierrors.IsNotFound(err) {
 		// the certificate does not exist, let's make one
-		cert = c.clusterCertificateForUser(user, scheme)
+		cert := c.clusterCertificateForUser(user, scheme)
 		if err = c.client.Create(context.TODO(), cert); err != nil {
 			return userCert, errorfactory.New(errorfactory.APIFailure{}, err, "could not create user certificate")
 		}

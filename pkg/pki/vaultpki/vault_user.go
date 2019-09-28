@@ -258,6 +258,7 @@ func (v *vaultPKI) FinalizeUserCertificate(user *v1alpha1.KafkaUser) (err error)
 
 	if _, err = client.Logical().Delete(storePath); err != nil {
 		err = errorfactory.New(errorfactory.VaultAPIFailure{}, err, "failed to delete secret from user provided location")
+		return
 	}
 
 	return nil

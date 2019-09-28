@@ -50,7 +50,7 @@ func TestValidateTopic(t *testing.T) {
 	server := newMockServer()
 	topic := newMockTopic()
 
-	// Test non-existant kafka cluster
+	// Test non-existent kafka cluster
 	res := server.validateKafkaTopic(topic)
 	if res.Result.Reason != metav1.StatusReasonNotFound {
 		t.Error("Expected not found cluster, got:", res.Result)

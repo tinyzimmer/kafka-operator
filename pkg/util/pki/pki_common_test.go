@@ -61,7 +61,7 @@ func TestGetDNSNames(t *testing.T) {
 
 	cluster.Spec = v1beta1.KafkaClusterSpec{}
 	cluster.Spec.Brokers = []v1beta1.Broker{
-		v1beta1.Broker{Id: 0},
+		{Id: 0},
 	}
 
 	cluster.Spec.HeadlessServiceEnabled = true
