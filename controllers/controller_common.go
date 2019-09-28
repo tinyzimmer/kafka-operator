@@ -16,8 +16,11 @@ package controllers
 
 import (
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
+	"github.com/banzaicloud/kafka-operator/api/v1beta1"
+	"github.com/banzaicloud/kafka-operator/pkg/kafkaclient"
 	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func requeueWithError(logger logr.Logger, msg string, err error) (ctrl.Result, error) {
@@ -36,4 +39,20 @@ func getClusterRefNamespace(ns string, ref v1alpha1.ClusterReference) string {
 		return ns
 	}
 	return clusterNamespace
+}
+
+func newBrokerConnection(log logr.Logger, client client.Client, cluster *v1beta1.KafkaCluster) (broker kafkaclient.KafkaClient, close func(), err error) {
+
+	// Get a kafka connection
+	log.Info("Retrieving kafka client")
+	broker, err = kafkaclient.NewFromCluster(client, cluster)
+	if err != nil {
+		return
+	}
+	close = func() {
+		if err := broker.Close(); err != nil {
+			log.Error(err, "Error closing kafka client")
+		}
+	}
+	return
 }

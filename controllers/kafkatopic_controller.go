@@ -121,8 +121,7 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 	}
 
 	// Get a kafka connection
-	reqLogger.Info("Retrieving kafka admin client")
-	broker, err := kafkaclient.NewFromCluster(r.Client, cluster)
+	broker, close, err := newBrokerConnection(reqLogger, r.Client, cluster)
 	if err != nil {
 		switch err.(type) {
 		case errorfactory.BrokersUnreachable:
@@ -145,12 +144,7 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 			return requeueWithError(reqLogger, err.Error(), err)
 		}
 	}
-
-	defer func() {
-		if err = broker.Close(); err != nil {
-			reqLogger.Error(err, "Error closing kafka connection")
-		}
-	}()
+	defer close()
 
 	// Check if marked for deletion and run finalizers
 	if k8sutil.IsMarkedForDeletion(instance.ObjectMeta) {

@@ -27,10 +27,8 @@ func (k *kafkaClient) CreateUserACLs(accessType v1alpha1.KafkaAccessType, dn str
 	userName := fmt.Sprintf("User:%s", dn)
 	switch accessType {
 	case v1alpha1.KafkaAccessTypeRead:
-		log.Info(fmt.Sprintf("Creating READ ACLs for %s to %s", userName, topic))
 		return k.createReadACLs(userName, topic)
 	case v1alpha1.KafkaAccessTypeWrite:
-		log.Info(fmt.Sprintf("Creating WRITE ACLs for %s to %s", userName, topic))
 		return k.createWriteACLs(userName, topic)
 	default:
 		return errorfactory.New(errorfactory.InternalError{}, fmt.Errorf("unknown type: %s", accessType), "unrecognized access type")

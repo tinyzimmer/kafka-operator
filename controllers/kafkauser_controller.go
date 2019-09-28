@@ -23,7 +23,6 @@ import (
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/k8sutil"
-	"github.com/banzaicloud/kafka-operator/pkg/kafkaclient"
 	"github.com/banzaicloud/kafka-operator/pkg/pki"
 	"github.com/banzaicloud/kafka-operator/pkg/util"
 	pkicommon "github.com/banzaicloud/kafka-operator/pkg/util/pki"
@@ -134,38 +133,6 @@ func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Re
 		return requeueWithError(reqLogger, "failed to lookup referenced cluster", err)
 	}
 
-	// Get a kafka connection
-	reqLogger.Info("Retrieving kafka admin client")
-	broker, err := kafkaclient.NewFromCluster(r.Client, cluster)
-	if err != nil {
-		switch err.(type) {
-		case errorfactory.BrokersUnreachable:
-			return ctrl.Result{
-				Requeue:      true,
-				RequeueAfter: time.Duration(15) * time.Second,
-			}, nil
-		case errorfactory.BrokersNotReady:
-			return ctrl.Result{
-				Requeue:      true,
-				RequeueAfter: time.Duration(15) * time.Second,
-			}, nil
-		case errorfactory.ResourceNotReady:
-			reqLogger.Info("Controller secret not found, may not be ready")
-			return ctrl.Result{
-				Requeue:      true,
-				RequeueAfter: time.Duration(5) * time.Second,
-			}, nil
-		default:
-			return requeueWithError(reqLogger, err.Error(), err)
-		}
-	}
-
-	defer func() {
-		if err := broker.Close(); err != nil {
-			reqLogger.Error(err, "could not close client")
-		}
-	}()
-
 	pkiManager := pki.GetPKIManager(r.Client, cluster)
 
 	// Reconcile no matter what to get a user certificate instance for ACL management
@@ -193,15 +160,42 @@ func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Re
 		if err = pkiManager.FinalizeUserCertificate(instance); err != nil {
 			return requeueWithError(reqLogger, "failed to finalize user certificate", err)
 		}
-		return r.checkFinalizers(reqLogger, broker, instance, user)
+		return r.checkFinalizers(reqLogger, cluster, instance, user)
 	}
 
-	// ensure ACLs - CreateUserACLs returns no error if the ACLs already exist
-	// TODO (tinyzimmer): Should probably take this opportunity to see if we are removing any ACLs
-	for _, grant := range instance.Spec.TopicGrants {
-		reqLogger.Info(fmt.Sprintf("Ensuring %s ACLs for User: %s -> Topic: %s", grant.AccessType, user.DN(), grant.TopicName))
-		if err = broker.CreateUserACLs(grant.AccessType, user.DN(), grant.TopicName); err != nil {
-			return requeueWithError(reqLogger, "failed to ensure ACLs for kafkauser", err)
+	// If topic grants supplied, grab a broker connection and set ACLs
+	if len(instance.Spec.TopicGrants) > 0 {
+		broker, close, err := newBrokerConnection(reqLogger, r.Client, cluster)
+		if err != nil {
+			switch err.(type) {
+			case errorfactory.BrokersUnreachable:
+				return ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: time.Duration(15) * time.Second,
+				}, nil
+			case errorfactory.BrokersNotReady:
+				return ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: time.Duration(15) * time.Second,
+				}, nil
+			case errorfactory.ResourceNotReady:
+				reqLogger.Info("Controller secret not found, may not be ready")
+				return ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: time.Duration(5) * time.Second,
+				}, nil
+			default:
+				return requeueWithError(reqLogger, err.Error(), err)
+			}
+		}
+		defer close()
+		// TODO (tinyzimmer): Should probably take this opportunity to see if we are removing any ACLs
+		for _, grant := range instance.Spec.TopicGrants {
+			reqLogger.Info(fmt.Sprintf("Ensuring %s ACLs for User: %s -> Topic: %s", grant.AccessType, user.DN(), grant.TopicName))
+			// CreateUserACLs returns no error if the ACLs already exist
+			if err = broker.CreateUserACLs(grant.AccessType, user.DN(), grant.TopicName); err != nil {
+				return requeueWithError(reqLogger, "failed to ensure ACLs for kafkauser", err)
+			}
 		}
 	}
 
@@ -216,12 +210,14 @@ func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Re
 	return reconciled()
 }
 
-func (r *KafkaUserReconciler) checkFinalizers(reqLogger logr.Logger, broker kafkaclient.KafkaClient, instance *v1alpha1.KafkaUser, user *pkicommon.UserCertificate) (reconcile.Result, error) {
+func (r *KafkaUserReconciler) checkFinalizers(reqLogger logr.Logger, cluster *v1beta1.KafkaCluster, instance *v1alpha1.KafkaUser, user *pkicommon.UserCertificate) (reconcile.Result, error) {
 	// run finalizers
 	var err error
 	if util.StringSliceContains(instance.GetFinalizers(), userFinalizer) {
-		if err = r.finalizeKafkaUser(reqLogger, broker, user); err != nil {
-			return requeueWithError(reqLogger, "failed to finalize kafkauser", err)
+		if len(instance.Spec.TopicGrants) > 0 {
+			if err = r.finalizeKafkaUserACLs(reqLogger, cluster, user); err != nil {
+				return requeueWithError(reqLogger, "failed to finalize kafkauser", err)
+			}
 		}
 		// remove finalizer
 		if err = r.removeFinalizer(instance); err != nil {
@@ -236,9 +232,14 @@ func (r *KafkaUserReconciler) removeFinalizer(user *v1alpha1.KafkaUser) error {
 	return r.Client.Update(context.TODO(), user)
 }
 
-func (r *KafkaUserReconciler) finalizeKafkaUser(reqLogger logr.Logger, broker kafkaclient.KafkaClient, user *pkicommon.UserCertificate) error {
+func (r *KafkaUserReconciler) finalizeKafkaUserACLs(reqLogger logr.Logger, cluster *v1beta1.KafkaCluster, user *pkicommon.UserCertificate) error {
 	var err error
 	reqLogger.Info("Deleting user ACLs from kafka")
+	broker, close, err := newBrokerConnection(reqLogger, r.Client, cluster)
+	if err != nil {
+		return err
+	}
+	defer close()
 	if err = broker.DeleteUserACLs(user.DN()); err != nil {
 		return err
 	}
