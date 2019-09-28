@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
 	"github.com/go-logr/logr"
 	certv1 "github.com/jetstack/cert-manager/pkg/apis/certmanager/v1alpha1"
@@ -32,36 +33,24 @@ import (
 func reconcile(log logr.Logger, client client.Client, object runtime.Object, cluster *v1beta1.KafkaCluster) (err error) {
 	switch object.(type) {
 	case *certv1.ClusterIssuer:
-		clusterIssuer, _ := object.(*certv1.ClusterIssuer)
-		return reconcileClusterIssuer(log, client, clusterIssuer, cluster)
-	case *certv1.Issuer:
-		issuer, _ := object.(*certv1.Issuer)
-		return reconcileIssuer(log, client, issuer, cluster)
+		issuer, _ := object.(*certv1.ClusterIssuer)
+		return reconcileClusterIssuer(log, client, issuer, cluster)
 	case *certv1.Certificate:
 		cert, _ := object.(*certv1.Certificate)
 		return reconcileCertificate(log, client, cert, cluster)
 	case *corev1.Secret:
 		secret, _ := object.(*corev1.Secret)
 		return reconcileSecret(log, client, secret, cluster)
+	case *v1alpha1.KafkaUser:
+		user, _ := object.(*v1alpha1.KafkaUser)
+		return reconcileUser(log, client, user, cluster)
 	default:
 		panic(fmt.Sprintf("Invalid object type: %v", reflect.TypeOf(object)))
 	}
 }
 
-func reconcileClusterIssuer(log logr.Logger, client client.Client, clusterIssuer *certv1.ClusterIssuer, cluster *v1beta1.KafkaCluster) error {
+func reconcileClusterIssuer(log logr.Logger, client client.Client, issuer *certv1.ClusterIssuer, cluster *v1beta1.KafkaCluster) error {
 	obj := &certv1.ClusterIssuer{}
-	var err error
-	if err = client.Get(context.TODO(), types.NamespacedName{Name: clusterIssuer.Name, Namespace: clusterIssuer.Namespace}, obj); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return err
-		}
-		return client.Create(context.TODO(), clusterIssuer)
-	}
-	return nil
-}
-
-func reconcileIssuer(log logr.Logger, client client.Client, issuer *certv1.Issuer, cluster *v1beta1.KafkaCluster) error {
-	obj := &certv1.Issuer{}
 	var err error
 	if err = client.Get(context.TODO(), types.NamespacedName{Name: issuer.Name, Namespace: issuer.Namespace}, obj); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -92,6 +81,18 @@ func reconcileSecret(log logr.Logger, client client.Client, secret *corev1.Secre
 			return err
 		}
 		return client.Create(context.TODO(), secret)
+	}
+	return nil
+}
+
+func reconcileUser(log logr.Logger, client client.Client, user *v1alpha1.KafkaUser, cluster *v1beta1.KafkaCluster) error {
+	obj := &v1alpha1.KafkaUser{}
+	var err error
+	if err = client.Get(context.TODO(), types.NamespacedName{Name: user.Name, Namespace: user.Namespace}, obj); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		return client.Create(context.TODO(), user)
 	}
 	return nil
 }

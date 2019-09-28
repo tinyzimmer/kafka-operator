@@ -232,7 +232,7 @@ func (r *Reconciler) Reconcile(log logr.Logger) error {
 		for _, key := range []string{v1alpha1.ClientCertKey, v1alpha1.PeerCertKey} {
 			su, err := certutil.DecodeCertificate(controllerSecret.Data[key])
 			if err != nil {
-				return errors.WrapIfWithDetails(err, "Failed to decode our client certificate")
+				return errors.WrapIfWithDetails(err, "Failed to decode client certificate")
 			}
 			superUsers = append(superUsers, su.Subject.String())
 		}

@@ -17,6 +17,7 @@ package vaultpki
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
@@ -54,15 +55,16 @@ func (v *vaultPKI) ReconcileUserCertificate(user *v1alpha1.KafkaUser, scheme *ru
 		}
 		userCert = rawToCertificate(userSecret.Data, caCert)
 	} else {
-		userSecret, err = client.Logical().Write(
-			v.getIssuePath(),
-			map[string]interface{}{
-				"common_name":          user.Name,
-				"ttl":                  "60000h",
-				"private_key_format":   "pkcs8",
-				"exclude_cn_from_sans": true,
-			},
-		)
+		args := map[string]interface{}{
+			vaultCommonNameArg:        user.Name,
+			vaultTTLArg:               "60000h",
+			vaultPrivateKeyFormatArg:  "pkcs8",
+			vaultExcludeCNFromSANSArg: true,
+		}
+		if user.Spec.DNSNames != nil && len(user.Spec.DNSNames) > 0 {
+			args[vaultAltNamesArg] = strings.Join(user.Spec.DNSNames, ",")
+		}
+		userSecret, err = client.Logical().Write(v.getIssuePath(), args)
 		if err != nil {
 			return nil, errorfactory.New(errorfactory.VaultAPIFailure{}, err, "failed to create user certificate")
 		}
