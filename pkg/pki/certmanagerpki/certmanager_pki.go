@@ -34,13 +34,50 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// FinalizePKI for cert-manager backend auto returns because controller references handle cleanup
-// TODO: (tinyzimmer) - This should probably delete certificates before other teardowns happen.
-// caught a race-condition:
-// - KafkaCluster deleted
-// - all children deleted
-// - secret deleted before certificate and certificate recreates secret before it gets deleted itself
-func (c *certManager) FinalizePKI(logger logr.Logger) error { return nil }
+func (c *certManager) FinalizePKI(logger logr.Logger) error {
+	logger.Info("Removing cert-manager certificates and secrets")
+
+	// Safety check that we are actually doing something
+	if c.cluster.Spec.ListenersConfig.SSLSecrets == nil {
+		return nil
+	}
+
+	if c.cluster.Spec.ListenersConfig.SSLSecrets.Create {
+		// Names of our certificates and secrets
+		objNames := []types.NamespacedName{
+			{Name: fmt.Sprintf(pkicommon.BrokerCACertTemplate, c.cluster.Name), Namespace: "cert-manager"},
+			{Name: fmt.Sprintf(pkicommon.BrokerServerCertTemplate, c.cluster.Name), Namespace: c.cluster.Namespace},
+			{Name: fmt.Sprintf(pkicommon.BrokerControllerTemplate, c.cluster.Name), Namespace: c.cluster.Namespace},
+		}
+		for _, obj := range objNames {
+			// Delete the certificates first so we don't accidentally recreate the
+			// secret when it gets deleted
+			cert := &certv1.Certificate{}
+			if err := c.client.Get(context.TODO(), obj, cert); err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				if err := c.client.Delete(context.TODO(), cert); err != nil {
+					return err
+				}
+			}
+
+			// Might as well delete the secret and leave the controller reference
+			// as a safety belt
+			secret := &corev1.Secret{}
+			if err := c.client.Get(context.TODO(), obj, secret); err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				if err := c.client.Delete(context.TODO(), secret); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
 
 func (c *certManager) ReconcilePKI(logger logr.Logger, scheme *runtime.Scheme) (err error) {
 	log := logger.WithName("certmanager_pki")
