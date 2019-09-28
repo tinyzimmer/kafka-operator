@@ -66,7 +66,13 @@ func SetupKafkaUserWithManager(mgr ctrl.Manager) error {
 
 	// Watch for changes to secondary certificates and requeue the owner KafkaUser
 	// TODO (tinyzimmer): With supporting a second backend, we can reasonably allow the user to not
-	// have cert-manager installed in the cluster - therefore we don't need to watch
+	// have cert-manager installed in the cluster - therefore we don't need to watch.
+	//
+	// Maybe only set this watch up if a cluster is built using cert-manager backend
+	// via a once.Do or something.
+	//
+	// NOTE: To fully remove the cert-manager hard-dependency, we'd need to generate
+	// our own webhook certs either internally or from vault.
 	err = c.Watch(&source.Kind{Type: &certv1.Certificate{}}, &handler.EnqueueRequestForOwner{
 		IsController: true,
 		OwnerType:    &v1alpha1.KafkaUser{},
@@ -153,6 +159,7 @@ func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Re
 			return requeueWithError(reqLogger, err.Error(), err)
 		}
 	}
+
 	defer func() {
 		if err := broker.Close(); err != nil {
 			reqLogger.Error(err, "could not close client")

@@ -39,6 +39,10 @@ import (
 )
 
 var topicFinalizer = "finalizer.kafkatopics.kafka.banzaicloud.io"
+
+// TODO (tinyzimmer): Should this maybe just be one master sync routine
+// checking ALL known topics at an interval - or is it better to just have one
+// per topic
 var syncRoutines = make(map[types.UID]struct{}, 0)
 
 // SetupKafkaTopicWithManager registers kafka topic controller with manager
@@ -93,8 +97,6 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 	if err = r.Client.Get(context.TODO(), request.NamespacedName, instance); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
-			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
-			// Return and don't requeue
 			return reconciled()
 		}
 		// Error reading the object - requeue the request.
@@ -143,7 +145,11 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 			return requeueWithError(reqLogger, err.Error(), err)
 		}
 	}
-	defer broker.Close()
+	defer func() {
+		if err = broker.Close(); err != nil {
+			reqLogger.Error(err, "Error closing kafka connection")
+		}
+	}()
 
 	// Check if marked for deletion and run finalizers
 	if k8sutil.IsMarkedForDeletion(instance.ObjectMeta) {
