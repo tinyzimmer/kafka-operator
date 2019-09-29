@@ -237,7 +237,7 @@ func (r *KafkaTopicReconciler) ensureControllerReference(cluster *v1beta1.KafkaC
 		if !k8sutil.IsAlreadyOwnedError(err) {
 			return nil, err
 		}
-	} else if err == nil {
+	} else {
 		return r.updateAndFetchLatest(topic)
 	}
 	return topic, nil

@@ -194,9 +194,8 @@ func (r *KafkaClusterReconciler) checkFinalizers(log logr.Logger, cluster *v1bet
 			); err != nil {
 				if client.IgnoreNotFound(err) != nil {
 					return requeueWithError(log, "failed to send delete request for children kafkatopics", err)
-				} else {
-					log.Info(fmt.Sprintf("No matching kafkatopics in namespace: %s", ns.Name))
 				}
+				log.Info(fmt.Sprintf("No matching kafkatopics in namespace: %s", ns.Name))
 			}
 
 		}
@@ -218,9 +217,8 @@ func (r *KafkaClusterReconciler) checkFinalizers(log logr.Logger, cluster *v1bet
 			); err != nil {
 				if client.IgnoreNotFound(err) != nil {
 					return requeueWithError(log, "failed to send delete request for children kafkausers", err)
-				} else {
-					log.Info(fmt.Sprintf("No matching kafkausers in namespace: %s", ns.Name))
 				}
+				log.Info(fmt.Sprintf("No matching kafkausers in namespace: %s", ns.Name))
 			}
 		}
 		if cluster, err = r.removeFinalizer(cluster, clusterUsersFinalizer); err != nil {

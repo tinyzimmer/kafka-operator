@@ -209,7 +209,7 @@ func (r *KafkaUserReconciler) ensureControllerReference(cluster *v1beta1.KafkaCl
 		if !k8sutil.IsAlreadyOwnedError(err) {
 			return nil, err
 		}
-	} else if err == nil {
+	} else {
 		return r.updateAndFetchLatest(user)
 	}
 	return user, nil
