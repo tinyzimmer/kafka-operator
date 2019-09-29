@@ -15,12 +15,15 @@
 package vaultpki
 
 import (
+	"fmt"
 	"net"
 	"reflect"
 	"testing"
 
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
+	certutil "github.com/banzaicloud/kafka-operator/pkg/util/cert"
+	pkicommon "github.com/banzaicloud/kafka-operator/pkg/util/pki"
 	"github.com/hashicorp/vault/api"
 	"github.com/hashicorp/vault/builtin/logical/pki"
 	"github.com/hashicorp/vault/http"
@@ -29,12 +32,12 @@ import (
 	certv1 "github.com/jetstack/cert-manager/pkg/apis/certmanager/v1alpha1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
 
-var log = ctrl.Log.WithName("testing")
+var log = logf.Log.WithName("testing")
 
 func newMockCluster() *v1beta1.KafkaCluster {
 	cluster := &v1beta1.KafkaCluster{}
@@ -55,7 +58,7 @@ func newMockCluster() *v1beta1.KafkaCluster {
 	return cluster
 }
 
-func newVaultMock(t *testing.T) (VaultPKI, net.Listener) {
+func newVaultMock(t *testing.T) (*vaultPKI, net.Listener, *api.Client) {
 	t.Helper()
 
 	certv1.AddToScheme(scheme.Scheme)
@@ -67,7 +70,7 @@ func newVaultMock(t *testing.T) (VaultPKI, net.Listener) {
 		cluster:   newMockCluster(),
 		client:    fake.NewFakeClientWithScheme(scheme.Scheme),
 		getClient: func() (*api.Client, error) { return client, nil },
-	}, ln
+	}, ln, client
 }
 
 func createTestVault(t *testing.T) (net.Listener, *api.Client) {
@@ -110,12 +113,40 @@ func TestNew(t *testing.T) {
 }
 
 func TestAll(t *testing.T) {
-	mock, ln := newVaultMock(t)
+	mock, ln, client := newVaultMock(t)
 	defer ln.Close()
 
-	if err := mock.ReconcilePKI(log, scheme.Scheme); err != nil {
-		t.Error("Expected no error, got:", err)
+	cert, key, _, err := certutil.GenerateTestCert()
+	if err != nil {
+		t.Fatal("Failed to create test cert")
 	}
+	jks, passw, err := certutil.GenerateJKS(cert, key, cert)
+	if err != nil {
+		t.Fatal("Failed to convert test cert to JKS")
+	}
+
+	if err := mock.ReconcilePKI(log, scheme.Scheme); err == nil {
+		t.Error("Expected resource not ready, got nil")
+	} else if reflect.TypeOf(err) != reflect.TypeOf(errorfactory.ResourceNotReady{}) {
+		t.Error("Expected resource not ready, got:", err)
+	}
+
+	brokerPath := fmt.Sprintf("secret/%s", fmt.Sprintf(pkicommon.BrokerServerCertTemplate, mock.cluster.Name))
+	controllerPath := fmt.Sprintf("secret/%s", fmt.Sprintf(pkicommon.BrokerControllerTemplate, mock.cluster.Name))
+	client.Logical().Write(brokerPath, dataForUserCert(&pkicommon.UserCertificate{
+		Certificate: cert,
+		Key:         key,
+		CA:          cert,
+		JKS:         jks,
+		Password:    passw,
+	}))
+	client.Logical().Write(controllerPath, dataForUserCert(&pkicommon.UserCertificate{
+		Certificate: cert,
+		Key:         key,
+		CA:          cert,
+		JKS:         jks,
+		Password:    passw,
+	}))
 
 	// Should be safe to do multiple times
 	if err := mock.ReconcilePKI(log, scheme.Scheme); err != nil {

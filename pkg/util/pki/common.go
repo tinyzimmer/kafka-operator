@@ -20,6 +20,7 @@ import (
 
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
+	"github.com/banzaicloud/kafka-operator/pkg/resources/templates"
 	certutil "github.com/banzaicloud/kafka-operator/pkg/util/cert"
 	"github.com/banzaicloud/kafka-operator/pkg/util/kafka"
 	"github.com/go-logr/logr"
@@ -102,6 +103,7 @@ func GetCommonName(cluster *v1beta1.KafkaCluster) string {
 	return fmt.Sprintf("%s.%s.svc.cluster.local", fmt.Sprintf(kafka.AllBrokerServiceTemplate, cluster.Name), cluster.Namespace)
 }
 
+// brokerDNSNames returns all the possible DNS Names for a Kafka Broker
 func brokerDNSNames(cluster *v1beta1.KafkaCluster, broker v1beta1.Broker) (names []string) {
 	names = make([]string, 0)
 	if cluster.Spec.HeadlessServiceEnabled {
@@ -122,6 +124,7 @@ func brokerDNSNames(cluster *v1beta1.KafkaCluster, broker v1beta1.Broker) (names
 	return
 }
 
+// clusterDNSNames returns all the possible DNS Names for a Kafka Cluster
 func clusterDNSNames(cluster *v1beta1.KafkaCluster) (names []string) {
 	names = make([]string, 0)
 	if cluster.Spec.HeadlessServiceEnabled {
@@ -147,4 +150,33 @@ func clusterDNSNames(cluster *v1beta1.KafkaCluster) (names []string) {
 // LabelsForKafkaPKI returns kubernetes labels for a PKI object
 func LabelsForKafkaPKI(name string) map[string]string {
 	return map[string]string{"app": "kafka", "kafka_issuer": fmt.Sprintf(BrokerIssuerTemplate, name)}
+}
+
+func BrokerUserForCluster(cluster *v1beta1.KafkaCluster) *v1alpha1.KafkaUser {
+	return &v1alpha1.KafkaUser{
+		ObjectMeta: templates.ObjectMeta(GetCommonName(cluster), LabelsForKafkaPKI(cluster.Name), cluster),
+		Spec: v1alpha1.KafkaUserSpec{
+			SecretName: fmt.Sprintf(BrokerServerCertTemplate, cluster.Name),
+			DNSNames:   GetDNSNames(cluster),
+			IncludeJKS: true,
+			ClusterRef: v1alpha1.ClusterReference{
+				Name:      cluster.Name,
+				Namespace: cluster.Namespace,
+			},
+		},
+	}
+}
+
+func ControllerUserForCluster(cluster *v1beta1.KafkaCluster) *v1alpha1.KafkaUser {
+	return &v1alpha1.KafkaUser{
+		ObjectMeta: templates.ObjectMeta(fmt.Sprintf(BrokerControllerTemplate, cluster.Name), LabelsForKafkaPKI(cluster.Name), cluster),
+		Spec: v1alpha1.KafkaUserSpec{
+			SecretName: fmt.Sprintf(BrokerControllerTemplate, cluster.Name),
+			IncludeJKS: true,
+			ClusterRef: v1alpha1.ClusterReference{
+				Name:      cluster.Name,
+				Namespace: cluster.Namespace,
+			},
+		},
+	}
 }

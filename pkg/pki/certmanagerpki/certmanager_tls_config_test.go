@@ -27,14 +27,14 @@ import (
 
 func newMockControllerSecret(valid bool) *corev1.Secret {
 	secret := &corev1.Secret{}
-	secret.Name = "test-controller"
+	secret.Name = "test-crd-controller"
 	secret.Namespace = "test-namespace"
 	cert, key, _, _ := certutil.GenerateTestCert()
 	if valid {
 		secret.Data = map[string][]byte{
-			v1alpha1.ClientCertKey:       cert,
-			v1alpha1.ClientPrivateKeyKey: key,
-			v1alpha1.CACertKey:           cert,
+			corev1.TLSCertKey:       cert,
+			corev1.TLSPrivateKeyKey: key,
+			v1alpha1.CoreCACertKey:  cert,
 		}
 	}
 	return secret

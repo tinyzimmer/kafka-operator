@@ -15,7 +15,6 @@
 package vaultpki
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -24,7 +23,6 @@ import (
 	certutil "github.com/banzaicloud/kafka-operator/pkg/util/cert"
 	pkicommon "github.com/banzaicloud/kafka-operator/pkg/util/pki"
 	vaultapi "github.com/hashicorp/vault/api"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -39,21 +37,16 @@ func (v *vaultPKI) ReconcileUserCertificate(user *v1alpha1.KafkaUser, scheme *ru
 		return nil, err
 	}
 
-	caCert, err := v.getCA(client)
-	if err != nil {
-		return nil, err
-	}
-
 	var userSecret *vaultapi.Secret
 	var userCert *pkicommon.UserCertificate
-	if contains(certs, sanitizedResourceUid(user.GetUID())) {
+	if contains(certs, string(user.GetUID())) {
 		userSecret, err = client.Logical().Read(
-			fmt.Sprintf("%s/%s", v.getUserStorePath(), sanitizedResourceUid(user.GetUID())),
+			fmt.Sprintf("%s/%s", v.getUserStorePath(), user.GetUID()),
 		)
 		if err != nil {
 			return nil, errorfactory.New(errorfactory.VaultAPIFailure{}, err, "failed to retrieve user certificate")
 		}
-		userCert = rawToCertificate(userSecret.Data, caCert)
+		userCert = rawToCertificate(userSecret.Data)
 	} else {
 		args := map[string]interface{}{
 			vaultCommonNameArg:        user.Name,
@@ -68,9 +61,9 @@ func (v *vaultPKI) ReconcileUserCertificate(user *v1alpha1.KafkaUser, scheme *ru
 		if err != nil {
 			return nil, errorfactory.New(errorfactory.VaultAPIFailure{}, err, "failed to create user certificate")
 		}
-		userCert = rawToCertificate(userSecret.Data, caCert)
+		userCert = rawToCertificate(userSecret.Data)
 		_, err = client.Logical().Write(
-			fmt.Sprintf("%s/%s", v.getUserStorePath(), sanitizedResourceUid(user.GetUID())),
+			fmt.Sprintf("%s/%s", v.getUserStorePath(), user.GetUID()),
 			userSecret.Data,
 		)
 		if err != nil {
@@ -88,6 +81,12 @@ func (v *vaultPKI) ReconcileUserCertificate(user *v1alpha1.KafkaUser, scheme *ru
 func ensureVaultSecret(client *vaultapi.Client, userCert *pkicommon.UserCertificate, user *v1alpha1.KafkaUser) error {
 	storePath := user.Spec.SecretName
 
+	// Use default secret backend if no path provided
+	if len(strings.Split(storePath, "/")) == 1 {
+		storePath = fmt.Sprintf("secret/%s", storePath)
+	}
+
+	// Do pre-flight check to determine kv backend version
 	mountPath, v2, err := isKVv2(storePath, client)
 	if err != nil {
 		return err
@@ -119,7 +118,7 @@ func ensureVaultSecret(client *vaultapi.Client, userCert *pkicommon.UserCertific
 	// Ensure a JKS if requested
 	if user.Spec.IncludeJKS {
 		// we don't have an existing one - make a new one
-		if userCert.JKS == nil {
+		if userCert.JKS == nil || len(userCert.JKS) == 0 {
 			userCert.JKS, userCert.Password, err = certutil.GenerateJKS(userCert.Certificate, userCert.Key, userCert.CA)
 			if err != nil {
 				return errorfactory.New(errorfactory.InternalError{}, err, "failed to generate JKS from user certificate")
@@ -151,53 +150,6 @@ func certificatesMatch(cert1, cert2 *pkicommon.UserCertificate) bool {
 	return true
 }
 
-func dataForUserCert(cert *pkicommon.UserCertificate) map[string]interface{} {
-	data := map[string]interface{}{
-		corev1.TLSCertKey:       string(cert.Certificate),
-		corev1.TLSPrivateKeyKey: string(cert.Key),
-		v1alpha1.CoreCACertKey:  string(cert.CA),
-	}
-	if cert.JKS != nil && cert.Password != nil {
-		data[v1alpha1.TLSJKSKey] = cert.JKS
-		data[v1alpha1.PasswordKey] = string(cert.Password)
-	}
-	return data
-}
-
-func userCertForData(isV2 bool, data map[string]interface{}) (*pkicommon.UserCertificate, error) {
-	if isV2 {
-		var ok bool
-		if data, ok = data["data"].(map[string]interface{}); !ok {
-			return nil, errors.New("got v2 secret but could not parse data field")
-		}
-	}
-	cert := &pkicommon.UserCertificate{}
-	for _, key := range []string{corev1.TLSCertKey, corev1.TLSPrivateKeyKey, v1alpha1.CoreCACertKey} {
-		if _, ok := data[key]; !ok {
-			return nil, fmt.Errorf("user secret does not contain required field: %s", key)
-		}
-	}
-	certStr, _ := data[corev1.TLSCertKey].(string)
-	keyStr, _ := data[corev1.TLSPrivateKeyKey].(string)
-	caStr, _ := data[v1alpha1.CoreCACertKey].(string)
-
-	cert.Certificate = []byte(certStr)
-	cert.Key = []byte(keyStr)
-	cert.CA = []byte(caStr)
-
-	if _, ok := data[v1alpha1.TLSJKSKey]; ok {
-		jks, _ := data[v1alpha1.TLSJKSKey].([]byte)
-		cert.JKS = jks
-	}
-
-	if _, ok := data[v1alpha1.PasswordKey]; ok {
-		passw, _ := data[v1alpha1.PasswordKey].(string)
-		cert.Password = []byte(passw)
-	}
-
-	return cert, nil
-}
-
 func (v *vaultPKI) FinalizeUserCertificate(user *v1alpha1.KafkaUser) (err error) {
 	client, err := v.getClient()
 	if err != nil {
@@ -209,28 +161,23 @@ func (v *vaultPKI) FinalizeUserCertificate(user *v1alpha1.KafkaUser) (err error)
 		return
 	}
 
-	caCert, err := v.getCA(client)
-	if err != nil {
-		return
-	}
-
-	if !contains(certs, sanitizedResourceUid(user.GetUID())) {
+	if !contains(certs, string(user.GetUID())) {
 		// we'll just assume we already cleaned up
 		return nil
 	}
 
 	userSecret, err := client.Logical().Read(
-		fmt.Sprintf("%s/%s", v.getUserStorePath(), sanitizedResourceUid(user.GetUID())),
+		fmt.Sprintf("%s/%s", v.getUserStorePath(), user.GetUID()),
 	)
 	if err != nil {
 		return errorfactory.New(errorfactory.VaultAPIFailure{}, err, "failed to retrieve user certificate")
 	}
 
-	userCert := rawToCertificate(userSecret.Data, caCert)
+	userCert := rawToCertificate(userSecret.Data)
 
 	// Revoke the certificate
 	if _, err = client.Logical().Write(
-		fmt.Sprintf("%s/revoke", v.getIntermediatePath()),
+		fmt.Sprintf("%s/revoke", v.getCAPath()),
 		map[string]interface{}{
 			vaultSerialNoKey: userCert.Serial,
 		},
@@ -240,7 +187,7 @@ func (v *vaultPKI) FinalizeUserCertificate(user *v1alpha1.KafkaUser) (err error)
 
 	// Delete entry from user store
 	if _, err = client.Logical().Delete(
-		fmt.Sprintf("%s/%s", v.getUserStorePath(), sanitizedResourceUid(user.GetUID())),
+		fmt.Sprintf("%s/%s", v.getUserStorePath(), user.GetUID()),
 	); err != nil {
 		return errorfactory.New(errorfactory.VaultAPIFailure{}, err, "failed to delete certificate from user store")
 	}

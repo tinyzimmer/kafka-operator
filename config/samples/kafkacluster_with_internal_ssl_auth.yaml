@@ -44,7 +44,7 @@ spec:
       tlsSecretName: "test-kafka-operator"
       jksPasswordName: "test-kafka-operator-pass"
       create: true
-      #pkiBackend: vault
+      pkiBackend: vault
   cruiseControlConfig:
     config: |
       # Copyright 2017 LinkedIn Corp. Licensed under the BSD 2-Clause License (the "License"). See License in the project root for license information.

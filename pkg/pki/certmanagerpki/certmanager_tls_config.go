@@ -18,9 +18,11 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
+	pkicommon "github.com/banzaicloud/kafka-operator/pkg/util/pki"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -32,7 +34,8 @@ func (c *certManager) GetControllerTLSConfig() (config *tls.Config, err error) {
 	err = c.client.Get(context.TODO(),
 		types.NamespacedName{
 			Namespace: c.cluster.Namespace,
-			Name:      c.cluster.Spec.ListenersConfig.SSLSecrets.TLSSecretName},
+			Name:      fmt.Sprintf(pkicommon.BrokerControllerTemplate, c.cluster.Name),
+		},
 		tlsKeys,
 	)
 	if err != nil {
@@ -41,9 +44,9 @@ func (c *certManager) GetControllerTLSConfig() (config *tls.Config, err error) {
 		}
 		return
 	}
-	clientCert := tlsKeys.Data[v1alpha1.ClientCertKey]
-	clientKey := tlsKeys.Data[v1alpha1.ClientPrivateKeyKey]
-	caCert := tlsKeys.Data[v1alpha1.CACertKey]
+	clientCert := tlsKeys.Data[corev1.TLSCertKey]
+	clientKey := tlsKeys.Data[corev1.TLSPrivateKeyKey]
+	caCert := tlsKeys.Data[v1alpha1.CoreCACertKey]
 	x509ClientCert, err := tls.X509KeyPair(clientCert, clientKey)
 	if err != nil {
 		err = errorfactory.New(errorfactory.InternalError{}, err, "could not decode controller certificate")

@@ -19,10 +19,10 @@ import (
 	"fmt"
 
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
+	"github.com/banzaicloud/kafka-operator/api/v1beta1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/k8sutil"
 	"github.com/banzaicloud/kafka-operator/pkg/resources/templates"
-	certutil "github.com/banzaicloud/kafka-operator/pkg/util/cert"
 	pkicommon "github.com/banzaicloud/kafka-operator/pkg/util/pki"
 	"github.com/go-logr/logr"
 	certv1 "github.com/jetstack/cert-manager/pkg/apis/certmanager/v1alpha1"
@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -56,10 +57,12 @@ func (c *certManager) FinalizePKI(logger logr.Logger) error {
 			if err := c.client.Get(context.TODO(), obj, cert); err != nil {
 				if apierrors.IsNotFound(err) {
 					continue
-				}
-				if err := c.client.Delete(context.TODO(), cert); err != nil {
+				} else {
 					return err
 				}
+			}
+			if err := c.client.Delete(context.TODO(), cert); err != nil {
+				return err
 			}
 
 			// Might as well delete the secret and leave the controller reference earlier
@@ -68,10 +71,12 @@ func (c *certManager) FinalizePKI(logger logr.Logger) error {
 			if err := c.client.Get(context.TODO(), obj, secret); err != nil {
 				if apierrors.IsNotFound(err) {
 					continue
-				}
-				if err := c.client.Delete(context.TODO(), secret); err != nil {
+				} else {
 					return err
 				}
+			}
+			if err := c.client.Delete(context.TODO(), secret); err != nil {
+				return err
 			}
 		}
 	}
@@ -95,26 +100,6 @@ func (c *certManager) ReconcilePKI(logger logr.Logger, scheme *runtime.Scheme) (
 
 	if c.cluster.Spec.ListenersConfig.SSLSecrets.Create {
 
-		// I'm going to be lazy for now and make a copy in the format we expect
-		// later during pod generation.
-		bootSecret, passSecret, err := c.getBootstrapSSLSecret()
-		if err != nil {
-			return err
-		}
-
-		for _, o := range []*corev1.Secret{bootSecret, passSecret} {
-			secret := &corev1.Secret{}
-			if err := c.client.Get(context.TODO(), types.NamespacedName{Name: o.Name, Namespace: o.Namespace}, secret); err != nil {
-				if apierrors.IsNotFound(err) {
-					if err := c.client.Create(context.TODO(), o); err != nil {
-						return errorfactory.New(errorfactory.APIFailure{}, err, "failed to create bootstrap secret")
-					}
-				} else {
-					return errorfactory.New(errorfactory.APIFailure{}, err, "failed to lookup bootstrap secret")
-				}
-			}
-		}
-
 		// Grab ownership of CA secret for garbage collection
 		secret := &corev1.Secret{}
 		if err := c.client.Get(context.TODO(), types.NamespacedName{
@@ -129,9 +114,8 @@ func (c *certManager) ReconcilePKI(logger logr.Logger, scheme *runtime.Scheme) (
 		if err := controllerutil.SetControllerReference(c.cluster, secret, scheme); err != nil {
 			if k8sutil.IsAlreadyOwnedError(err) {
 				return nil
-			} else {
-				return errorfactory.New(errorfactory.InternalError{}, err, "failed to set controller reference on secret")
 			}
+			return errorfactory.New(errorfactory.InternalError{}, err, "failed to set controller reference on secret")
 		}
 		if err := c.client.Update(context.TODO(), secret); err != nil {
 			return errorfactory.New(errorfactory.APIFailure{}, err, "failed to set controller reference on secret")
@@ -143,170 +127,119 @@ func (c *certManager) ReconcilePKI(logger logr.Logger, scheme *runtime.Scheme) (
 }
 
 func (c *certManager) kafkapki(scheme *runtime.Scheme) ([]runtime.Object, error) {
-	rootCertMeta := templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerCACertTemplate, c.cluster.Name), pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster)
-	rootCertMeta.Namespace = "cert-manager"
 
 	if c.cluster.Spec.ListenersConfig.SSLSecrets.Create {
 		// A self-signer for the CA Certificate
-		selfsignerMeta := templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerSelfSignerTemplate, c.cluster.Name), pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster)
-		selfsignerMeta.Namespace = metav1.NamespaceAll
-		selfsigner := &certv1.ClusterIssuer{
-			ObjectMeta: selfsignerMeta,
-			Spec: certv1.IssuerSpec{
-				IssuerConfig: certv1.IssuerConfig{
-					SelfSigned: &certv1.SelfSignedIssuer{},
-				},
-			},
-		}
-		controllerutil.SetControllerReference(c.cluster, selfsigner, scheme)
+		selfsigner := selfSignerForCluster(c.cluster, scheme)
 
 		// The CA Certificate
-		ca := &certv1.Certificate{
-			ObjectMeta: rootCertMeta,
-			Spec: certv1.CertificateSpec{
-				SecretName: fmt.Sprintf(pkicommon.BrokerCACertTemplate, c.cluster.Name),
-				CommonName: fmt.Sprintf(pkicommon.CAFQDNTemplate, c.cluster.Name, c.cluster.Namespace),
-				IsCA:       true,
-				IssuerRef: certv1.ObjectReference{
-					Name: fmt.Sprintf(pkicommon.BrokerSelfSignerTemplate, c.cluster.Name),
-					Kind: "ClusterIssuer",
-				},
-			},
-		}
-		controllerutil.SetControllerReference(c.cluster, ca, scheme)
+		ca := caCertForCluster(c.cluster, scheme)
+
 		// A cluster issuer backed by the CA certificate - so it can provision secrets
 		// for producers/consumers in other namespaces
-		clusterIssuerMeta := templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerIssuerTemplate, c.cluster.Name), pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster)
-		clusterIssuerMeta.Namespace = metav1.NamespaceAll
-		clusterissuer := &certv1.ClusterIssuer{
-			ObjectMeta: clusterIssuerMeta,
-			Spec: certv1.IssuerSpec{
-				IssuerConfig: certv1.IssuerConfig{
-					CA: &certv1.CAIssuer{
-						SecretName: fmt.Sprintf(pkicommon.BrokerCACertTemplate, c.cluster.Name),
-					},
-				},
-			},
-		}
-		controllerutil.SetControllerReference(c.cluster, clusterissuer, scheme)
+		clusterissuer := mainIssuerForCluster(c.cluster, scheme)
 
 		// Broker "user"
-		brokerUser := &v1alpha1.KafkaUser{
-			ObjectMeta: templates.ObjectMeta(pkicommon.GetCommonName(c.cluster), pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster),
-			Spec: v1alpha1.KafkaUserSpec{
-				SecretName: fmt.Sprintf(pkicommon.BrokerServerCertTemplate, c.cluster.Name),
-				DNSNames:   pkicommon.GetDNSNames(c.cluster),
-				IncludeJKS: true,
-				ClusterRef: v1alpha1.ClusterReference{
-					Name:      c.cluster.Name,
-					Namespace: c.cluster.Namespace,
-				},
-			},
-		}
+		brokerUser := pkicommon.BrokerUserForCluster(c.cluster)
 
-		// Controller/Cruise-Control user for the cluster
-		controllerUser := &v1alpha1.KafkaUser{
-			ObjectMeta: templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerControllerTemplate, c.cluster.Name), pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster),
-			Spec: v1alpha1.KafkaUserSpec{
-				SecretName: fmt.Sprintf(pkicommon.BrokerControllerTemplate, c.cluster.Name),
-				ClusterRef: v1alpha1.ClusterReference{
-					Name:      c.cluster.Name,
-					Namespace: c.cluster.Namespace,
-				},
-			},
-		}
+		// Controller user
+		controllerUser := pkicommon.ControllerUserForCluster(c.cluster)
 
 		return []runtime.Object{selfsigner, ca, clusterissuer, brokerUser, controllerUser}, nil
 
 	}
 
 	// If we aren't creating the secrets we need a cluster issuer made from the provided secret
+	caSecret, err := caSecretForProvidedCert(c.client, c.cluster, scheme)
+	if err != nil {
+		return nil, err
+	}
+	clusterissuer := mainIssuerForCluster(c.cluster, scheme)
+
+	// Then finally broker/controller users from the imported CA
+	// The client certificates in the secret will still work, however are not actually used.
+	// This will also make sure that if the peerCert/clientCert provided are invalid
+	// a valid one will still be used with the provided CA.
+	// TODO: (tinyzimmer) - Would it be better to allow the KafkaUser to take a user-provided cert/key combination?
+	brokerUser := pkicommon.BrokerUserForCluster(c.cluster)
+	controllerUser := pkicommon.ControllerUserForCluster(c.cluster)
+	return []runtime.Object{caSecret, clusterissuer, brokerUser, controllerUser}, nil
+
+}
+
+func caSecretForProvidedCert(client client.Client, cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) (*corev1.Secret, error) {
 	secret := &corev1.Secret{}
-	err := c.client.Get(context.TODO(), types.NamespacedName{Namespace: c.cluster.Namespace, Name: c.cluster.Spec.ListenersConfig.SSLSecrets.TLSSecretName}, secret)
+	err := client.Get(context.TODO(), types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Spec.ListenersConfig.SSLSecrets.TLSSecretName}, secret)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			err = errorfactory.New(errorfactory.ResourceNotReady{}, err, "could not find provided tls secret")
 		} else {
 			err = errorfactory.New(errorfactory.APIFailure{}, err, "could not lookup provided tls secret")
 		}
-		return []runtime.Object{}, err
+		return nil, err
 	}
+
 	caKey := secret.Data[v1alpha1.CAPrivateKeyKey]
 	caCert := secret.Data[v1alpha1.CACertKey]
-
 	caSecret := &corev1.Secret{
-		ObjectMeta: templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerCACertTemplate, c.cluster.Name), pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster),
+		ObjectMeta: templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerCACertTemplate, cluster.Name), pkicommon.LabelsForKafkaPKI(cluster.Name), cluster),
 		Data: map[string][]byte{
 			v1alpha1.CoreCACertKey:  caCert,
 			corev1.TLSCertKey:       caCert,
 			corev1.TLSPrivateKeyKey: caKey,
 		},
 	}
-	controllerutil.SetControllerReference(c.cluster, caSecret, scheme)
+	controllerutil.SetControllerReference(cluster, caSecret, scheme)
+	return caSecret, nil
+}
 
-	clusterIssuerMeta := templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerIssuerTemplate, c.cluster.Name), pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster)
+func selfSignerForCluster(cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) *certv1.ClusterIssuer {
+	selfsignerMeta := templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerSelfSignerTemplate, cluster.Name), pkicommon.LabelsForKafkaPKI(cluster.Name), cluster)
+	selfsignerMeta.Namespace = metav1.NamespaceAll
+	selfsigner := &certv1.ClusterIssuer{
+		ObjectMeta: selfsignerMeta,
+		Spec: certv1.IssuerSpec{
+			IssuerConfig: certv1.IssuerConfig{
+				SelfSigned: &certv1.SelfSignedIssuer{},
+			},
+		},
+	}
+	controllerutil.SetControllerReference(cluster, selfsigner, scheme)
+	return selfsigner
+}
+
+func caCertForCluster(cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) *certv1.Certificate {
+	rootCertMeta := templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerCACertTemplate, cluster.Name), pkicommon.LabelsForKafkaPKI(cluster.Name), cluster)
+	rootCertMeta.Namespace = "cert-manager"
+	ca := &certv1.Certificate{
+		ObjectMeta: rootCertMeta,
+		Spec: certv1.CertificateSpec{
+			SecretName: fmt.Sprintf(pkicommon.BrokerCACertTemplate, cluster.Name),
+			CommonName: fmt.Sprintf(pkicommon.CAFQDNTemplate, cluster.Name, cluster.Namespace),
+			IsCA:       true,
+			IssuerRef: certv1.ObjectReference{
+				Name: fmt.Sprintf(pkicommon.BrokerSelfSignerTemplate, cluster.Name),
+				Kind: "ClusterIssuer",
+			},
+		},
+	}
+	controllerutil.SetControllerReference(cluster, ca, scheme)
+	return ca
+}
+
+func mainIssuerForCluster(cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) *certv1.ClusterIssuer {
+	clusterIssuerMeta := templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerIssuerTemplate, cluster.Name), pkicommon.LabelsForKafkaPKI(cluster.Name), cluster)
 	clusterIssuerMeta.Namespace = metav1.NamespaceAll
-	clusterissuer := &certv1.ClusterIssuer{
+	issuer := &certv1.ClusterIssuer{
 		ObjectMeta: clusterIssuerMeta,
 		Spec: certv1.IssuerSpec{
 			IssuerConfig: certv1.IssuerConfig{
 				CA: &certv1.CAIssuer{
-					SecretName: fmt.Sprintf(pkicommon.BrokerCACertTemplate, c.cluster.Name),
+					SecretName: fmt.Sprintf(pkicommon.BrokerCACertTemplate, cluster.Name),
 				},
 			},
 		},
 	}
-	controllerutil.SetControllerReference(c.cluster, clusterissuer, scheme)
-
-	return []runtime.Object{caSecret, clusterissuer}, nil
-
-}
-
-func (c *certManager) getBootstrapSSLSecret() (certs, passw *corev1.Secret, err error) {
-	// get server (peer) certificate
-	serverSecret := &corev1.Secret{}
-	if err = c.client.Get(context.TODO(), types.NamespacedName{
-		Name:      fmt.Sprintf(pkicommon.BrokerServerCertTemplate, c.cluster.Name),
-		Namespace: c.cluster.Namespace,
-	}, serverSecret); err != nil {
-		if apierrors.IsNotFound(err) {
-			err = errorfactory.New(errorfactory.ResourceNotReady{}, err, "server secret not ready")
-			return
-		}
-		err = errorfactory.New(errorfactory.APIFailure{}, err, "could not get server cert")
-		return
-	}
-
-	clientSecret := &corev1.Secret{}
-	if err = c.client.Get(context.TODO(), types.NamespacedName{
-		Name:      fmt.Sprintf(pkicommon.BrokerControllerTemplate, c.cluster.Name),
-		Namespace: c.cluster.Namespace,
-	}, clientSecret); err != nil {
-		if apierrors.IsNotFound(err) {
-			err = errorfactory.New(errorfactory.ResourceNotReady{}, err, "client secret not ready")
-			return
-		}
-		err = errorfactory.New(errorfactory.APIFailure{}, err, "could not get client cert")
-		return
-	}
-
-	certs = &corev1.Secret{
-		ObjectMeta: templates.ObjectMeta(c.cluster.Spec.ListenersConfig.SSLSecrets.TLSSecretName, pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster),
-		Data: map[string][]byte{
-			v1alpha1.CACertKey:           serverSecret.Data[v1alpha1.CoreCACertKey],
-			v1alpha1.PeerCertKey:         serverSecret.Data[corev1.TLSCertKey],
-			v1alpha1.PeerPrivateKeyKey:   serverSecret.Data[corev1.TLSPrivateKeyKey],
-			v1alpha1.ClientCertKey:       clientSecret.Data[corev1.TLSCertKey],
-			v1alpha1.ClientPrivateKeyKey: clientSecret.Data[corev1.TLSPrivateKeyKey],
-		},
-	}
-
-	passw = &corev1.Secret{
-		ObjectMeta: templates.ObjectMeta(c.cluster.Spec.ListenersConfig.SSLSecrets.JKSPasswordName, pkicommon.LabelsForKafkaPKI(c.cluster.Name), c.cluster),
-		Data: map[string][]byte{
-			v1alpha1.PasswordKey: certutil.GeneratePass(16),
-		},
-	}
-
-	return
+	controllerutil.SetControllerReference(cluster, issuer, scheme)
+	return issuer
 }

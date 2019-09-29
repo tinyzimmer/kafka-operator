@@ -177,10 +177,7 @@ func GenerateJKS(clientCert, clientKey, clientCA []byte) (out, passw []byte, err
 	var outBuf bytes.Buffer
 	passw = GeneratePass(16)
 	err = keystore.Encode(&outBuf, jks, passw)
-	if err == nil {
-		out = outBuf.Bytes()
-	}
-	return
+	return outBuf.Bytes(), passw, err
 }
 
 // GenerateTestCert is used from unit tests for generating certificates
