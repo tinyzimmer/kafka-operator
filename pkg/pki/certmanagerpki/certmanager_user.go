@@ -152,7 +152,7 @@ func (c *certManager) clusterCertificateForUser(user *v1alpha1.KafkaUser, scheme
 
 // getCA returns the CA name/kind for the KafkaCluster
 func (c *certManager) getCA() (caName, caKind string) {
-	caKind = "ClusterIssuer"
+	caKind = certv1.ClusterIssuerKind
 	caName = fmt.Sprintf(pkicommon.BrokerIssuerTemplate, c.cluster.Name)
 	return
 }

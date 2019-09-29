@@ -17,6 +17,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
@@ -96,7 +97,7 @@ type KafkaUserReconciler struct {
 	Log    logr.Logger
 }
 
-// +kubebuilder:rbac:groups=kafka.banzaicloud.io,resources=kafkausers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kafka.banzaicloud.io,resources=kafkausers,verbs=get;list;watch;create;update;patch;delete;deletecollection
 // +kubebuilder:rbac:groups=kafka.banzaicloud.io,resources=kafkausers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=certmanager.k8s.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=certmanager.k8s.io,resources=issuers,verbs=get;list;watch;create;update;patch;delete
@@ -165,44 +166,20 @@ func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Re
 	}
 
 	// ensure a controller reference on the user
-	if err = controllerutil.SetControllerReference(cluster, instance, r.Scheme); err != nil {
-		if !k8sutil.IsAlreadyOwnedError(err) {
-			return requeueWithError(reqLogger, "failed to set controller reference on user", err)
-		}
-	} else if err == nil {
-		if err = r.Client.Update(context.TODO(), instance); err != nil {
-			return requeueWithError(reqLogger, "failed to update user with controller reference", err)
-		}
-		instance = &v1alpha1.KafkaUser{}
-		if err = r.Client.Get(context.TODO(), request.NamespacedName, instance); err != nil {
-			return requeueWithError(reqLogger, "failed to fetch updated user instance", err)
-		}
+	if instance, err = r.ensureControllerReference(cluster, instance); err != nil {
+		return requeueWithError(reqLogger, "failed to ensure controller reference on user", err)
+	}
+
+	// ensure a kafkaCluster label
+	if instance, err = r.ensureClusterLabel(cluster, instance); err != nil {
+		return requeueWithError(reqLogger, "failed to ensure kafkacluster label on user", err)
 	}
 
 	// If topic grants supplied, grab a broker connection and set ACLs
 	if len(instance.Spec.TopicGrants) > 0 {
 		broker, close, err := newBrokerConnection(reqLogger, r.Client, cluster)
 		if err != nil {
-			switch err.(type) {
-			case errorfactory.BrokersUnreachable:
-				return ctrl.Result{
-					Requeue:      true,
-					RequeueAfter: time.Duration(15) * time.Second,
-				}, nil
-			case errorfactory.BrokersNotReady:
-				return ctrl.Result{
-					Requeue:      true,
-					RequeueAfter: time.Duration(15) * time.Second,
-				}, nil
-			case errorfactory.ResourceNotReady:
-				reqLogger.Info("Controller secret not found, may not be ready")
-				return ctrl.Result{
-					Requeue:      true,
-					RequeueAfter: time.Duration(5) * time.Second,
-				}, nil
-			default:
-				return requeueWithError(reqLogger, err.Error(), err)
-			}
+			return checkBrokerConnectionError(reqLogger, err)
 		}
 		defer close()
 
@@ -225,6 +202,47 @@ func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Re
 	}
 
 	return reconciled()
+}
+
+func (r *KafkaUserReconciler) ensureControllerReference(cluster *v1beta1.KafkaCluster, user *v1alpha1.KafkaUser) (*v1alpha1.KafkaUser, error) {
+	if err := controllerutil.SetControllerReference(cluster, user, r.Scheme); err != nil {
+		if !k8sutil.IsAlreadyOwnedError(err) {
+			return nil, err
+		}
+	} else if err == nil {
+		return r.updateAndFetchLatest(user)
+	}
+	return user, nil
+}
+
+func (r *KafkaUserReconciler) ensureClusterLabel(cluster *v1beta1.KafkaCluster, user *v1alpha1.KafkaUser) (*v1alpha1.KafkaUser, error) {
+	labelValue := clusterLabelString(cluster)
+	labels := user.GetLabels()
+	if label, ok := labels[clusterRefLabel]; ok {
+		if label != labelValue {
+			labels[clusterRefLabel] = labelValue
+		}
+	} else {
+		labels[clusterRefLabel] = labelValue
+	}
+	if !reflect.DeepEqual(labels, user.GetLabels()) {
+		user.SetLabels(labels)
+		return r.updateAndFetchLatest(user)
+	}
+	return user, nil
+}
+
+func (r *KafkaUserReconciler) updateAndFetchLatest(user *v1alpha1.KafkaUser) (*v1alpha1.KafkaUser, error) {
+	if err := r.Client.Update(context.TODO(), user); err != nil {
+		return nil, err
+	}
+	return r.fetchMostRecent(user)
+}
+
+func (r *KafkaUserReconciler) fetchMostRecent(user *v1alpha1.KafkaUser) (*v1alpha1.KafkaUser, error) {
+	updated := &v1alpha1.KafkaUser{}
+	err := r.Client.Get(context.TODO(), client.ObjectKey{Name: user.Name, Namespace: user.Namespace}, updated)
+	return updated, err
 }
 
 func (r *KafkaUserReconciler) checkFinalizers(reqLogger logr.Logger, cluster *v1beta1.KafkaCluster, instance *v1alpha1.KafkaUser, user *pkicommon.UserCertificate) (reconcile.Result, error) {

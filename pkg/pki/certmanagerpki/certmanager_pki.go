@@ -35,6 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+const namespaceCertManager = "cert-manager"
+
 func (c *certManager) FinalizePKI(logger logr.Logger) error {
 	logger.Info("Removing cert-manager certificates and secrets")
 
@@ -52,7 +54,7 @@ func (c *certManager) FinalizePKI(logger logr.Logger) error {
 		}
 		for _, obj := range objNames {
 			// Delete the certificates first so we don't accidentally recreate the
-			// secret when it gets deleted
+			// secret after it gets deleted
 			cert := &certv1.Certificate{}
 			if err := c.client.Get(context.TODO(), obj, cert); err != nil {
 				if apierrors.IsNotFound(err) {
@@ -85,7 +87,7 @@ func (c *certManager) FinalizePKI(logger logr.Logger) error {
 }
 
 func (c *certManager) ReconcilePKI(logger logr.Logger, scheme *runtime.Scheme) (err error) {
-	log := logger.WithName("certmanager_pki")
+	logger.Info("Reconciling cert-manager PKI")
 
 	resources, err := c.kafkapki(scheme)
 	if err != nil {
@@ -93,78 +95,85 @@ func (c *certManager) ReconcilePKI(logger logr.Logger, scheme *runtime.Scheme) (
 	}
 
 	for _, o := range resources {
-		if err := reconcile(log, c.client, o, c.cluster); err != nil {
+		if err := reconcile(logger, c.client, o, c.cluster); err != nil {
 			return err
 		}
 	}
 
 	if c.cluster.Spec.ListenersConfig.SSLSecrets.Create {
-
 		// Grab ownership of CA secret for garbage collection
-		secret := &corev1.Secret{}
-		if err := c.client.Get(context.TODO(), types.NamespacedName{
-			Name:      fmt.Sprintf(pkicommon.BrokerCACertTemplate, c.cluster.Name),
-			Namespace: "cert-manager",
-		}, secret); err != nil {
-			if apierrors.IsNotFound(err) {
-				return errorfactory.New(errorfactory.ResourceNotReady{}, err, "pki secret not ready")
-			}
-			return errorfactory.New(errorfactory.APIFailure{}, err, "could not fetch pki secret")
+		if err := ensureCASecretOwnership(c.client, c.cluster, scheme); err != nil {
+			return err
 		}
-		if err := controllerutil.SetControllerReference(c.cluster, secret, scheme); err != nil {
-			if k8sutil.IsAlreadyOwnedError(err) {
-				return nil
-			}
-			return errorfactory.New(errorfactory.InternalError{}, err, "failed to set controller reference on secret")
-		}
-		if err := c.client.Update(context.TODO(), secret); err != nil {
-			return errorfactory.New(errorfactory.APIFailure{}, err, "failed to set controller reference on secret")
-		}
-
 	}
 
 	return nil
 }
 
 func (c *certManager) kafkapki(scheme *runtime.Scheme) ([]runtime.Object, error) {
-
 	if c.cluster.Spec.ListenersConfig.SSLSecrets.Create {
+		return fullPKI(c.cluster, scheme), nil
+	}
+	return userProvidedPKI(c.client, c.cluster, scheme)
+}
+
+func fullPKI(cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) []runtime.Object {
+	return []runtime.Object{
 		// A self-signer for the CA Certificate
-		selfsigner := selfSignerForCluster(c.cluster, scheme)
-
+		selfSignerForCluster(cluster, scheme),
 		// The CA Certificate
-		ca := caCertForCluster(c.cluster, scheme)
-
+		caCertForCluster(cluster, scheme),
 		// A cluster issuer backed by the CA certificate - so it can provision secrets
 		// for producers/consumers in other namespaces
-		clusterissuer := mainIssuerForCluster(c.cluster, scheme)
-
+		mainIssuerForCluster(cluster, scheme),
 		// Broker "user"
-		brokerUser := pkicommon.BrokerUserForCluster(c.cluster)
-
-		// Controller user
-		controllerUser := pkicommon.ControllerUserForCluster(c.cluster)
-
-		return []runtime.Object{selfsigner, ca, clusterissuer, brokerUser, controllerUser}, nil
-
+		pkicommon.BrokerUserForCluster(cluster),
+		// Operator user
+		pkicommon.ControllerUserForCluster(cluster),
 	}
+}
 
+func userProvidedPKI(client client.Client, cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) ([]runtime.Object, error) {
 	// If we aren't creating the secrets we need a cluster issuer made from the provided secret
-	caSecret, err := caSecretForProvidedCert(c.client, c.cluster, scheme)
+	caSecret, err := caSecretForProvidedCert(client, cluster, scheme)
 	if err != nil {
 		return nil, err
 	}
-	clusterissuer := mainIssuerForCluster(c.cluster, scheme)
+	return []runtime.Object{
+		caSecret,
+		mainIssuerForCluster(cluster, scheme),
+		// The client/peer certificates in the secret will still work, however are not actually used.
+		// This will also make sure that if the peerCert/clientCert provided are invalid
+		// a valid one will still be used with the provided CA.
+		//
+		// TODO: (tinyzimmer) - Would it be better to allow the KafkaUser to take a user-provided cert/key combination?
+		// It would have to be validated first as signed by whatever the CA is - probably via a webhook.
+		pkicommon.BrokerUserForCluster(cluster),
+		pkicommon.ControllerUserForCluster(cluster),
+	}, nil
+}
 
-	// Then finally broker/controller users from the imported CA
-	// The client certificates in the secret will still work, however are not actually used.
-	// This will also make sure that if the peerCert/clientCert provided are invalid
-	// a valid one will still be used with the provided CA.
-	// TODO: (tinyzimmer) - Would it be better to allow the KafkaUser to take a user-provided cert/key combination?
-	brokerUser := pkicommon.BrokerUserForCluster(c.cluster)
-	controllerUser := pkicommon.ControllerUserForCluster(c.cluster)
-	return []runtime.Object{caSecret, clusterissuer, brokerUser, controllerUser}, nil
-
+func ensureCASecretOwnership(client client.Client, cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) error {
+	secret := &corev1.Secret{}
+	if err := client.Get(context.TODO(), types.NamespacedName{
+		Name:      fmt.Sprintf(pkicommon.BrokerCACertTemplate, cluster.Name),
+		Namespace: namespaceCertManager,
+	}, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return errorfactory.New(errorfactory.ResourceNotReady{}, err, "pki secret not ready")
+		}
+		return errorfactory.New(errorfactory.APIFailure{}, err, "could not fetch pki secret")
+	}
+	if err := controllerutil.SetControllerReference(cluster, secret, scheme); err != nil {
+		if k8sutil.IsAlreadyOwnedError(err) {
+			return nil
+		}
+		return errorfactory.New(errorfactory.InternalError{}, err, "failed to set controller reference on secret")
+	}
+	if err := client.Update(context.TODO(), secret); err != nil {
+		return errorfactory.New(errorfactory.APIFailure{}, err, "failed to set controller reference on secret")
+	}
+	return nil
 }
 
 func caSecretForProvidedCert(client client.Client, cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) (*corev1.Secret, error) {
@@ -210,7 +219,7 @@ func selfSignerForCluster(cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme)
 
 func caCertForCluster(cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) *certv1.Certificate {
 	rootCertMeta := templates.ObjectMeta(fmt.Sprintf(pkicommon.BrokerCACertTemplate, cluster.Name), pkicommon.LabelsForKafkaPKI(cluster.Name), cluster)
-	rootCertMeta.Namespace = "cert-manager"
+	rootCertMeta.Namespace = namespaceCertManager
 	ca := &certv1.Certificate{
 		ObjectMeta: rootCertMeta,
 		Spec: certv1.CertificateSpec{
@@ -219,7 +228,7 @@ func caCertForCluster(cluster *v1beta1.KafkaCluster, scheme *runtime.Scheme) *ce
 			IsCA:       true,
 			IssuerRef: certv1.ObjectReference{
 				Name: fmt.Sprintf(pkicommon.BrokerSelfSignerTemplate, cluster.Name),
-				Kind: "ClusterIssuer",
+				Kind: certv1.ClusterIssuerKind,
 			},
 		},
 	}

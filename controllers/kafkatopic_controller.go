@@ -17,11 +17,11 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
-	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/k8sutil"
 	"github.com/banzaicloud/kafka-operator/pkg/kafkaclient"
 	"github.com/banzaicloud/kafka-operator/pkg/util"
@@ -80,7 +80,7 @@ type KafkaTopicReconciler struct {
 	Log    logr.Logger
 }
 
-// +kubebuilder:rbac:groups=kafka.banzaicloud.io,resources=kafkatopics,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kafka.banzaicloud.io,resources=kafkatopics,verbs=get;list;watch;create;update;patch;delete;deletecollection
 // +kubebuilder:rbac:groups=kafka.banzaicloud.io,resources=kafkatopics/status,verbs=get;update;patch
 
 // Reconcile reconciles the kafka topic
@@ -123,26 +123,7 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 	// Get a kafka connection
 	broker, close, err := newBrokerConnection(reqLogger, r.Client, cluster)
 	if err != nil {
-		switch err.(type) {
-		case errorfactory.BrokersUnreachable:
-			return ctrl.Result{
-				Requeue:      true,
-				RequeueAfter: time.Duration(15) * time.Second,
-			}, nil
-		case errorfactory.BrokersNotReady:
-			return ctrl.Result{
-				Requeue:      true,
-				RequeueAfter: time.Duration(15) * time.Second,
-			}, nil
-		case errorfactory.ResourceNotReady:
-			reqLogger.Info("Controller secret not found, may not be ready")
-			return ctrl.Result{
-				Requeue:      true,
-				RequeueAfter: time.Duration(5) * time.Second,
-			}, nil
-		default:
-			return requeueWithError(reqLogger, err.Error(), err)
-		}
+		return checkBrokerConnectionError(reqLogger, err)
 	}
 	defer close()
 
@@ -187,10 +168,13 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 	}
 
 	// set controller reference to parent cluster
-	if err = controllerutil.SetControllerReference(cluster, instance, r.Scheme); err != nil {
-		if !k8sutil.IsAlreadyOwnedError(err) {
-			return requeueWithError(reqLogger, "failed to set cluster controller reference on new KafkaTopic", err)
-		}
+	if instance, err = r.ensureControllerReference(cluster, instance); err != nil {
+		return requeueWithError(reqLogger, "failed to ensure controller reference", err)
+	}
+
+	// ensure kafkaCluster label
+	if instance, err = r.ensureClusterLabel(cluster, instance); err != nil {
+		return requeueWithError(reqLogger, "failed to ensure kafkacluster label on topic", err)
 	}
 
 	// ensure a finalizer for cleanup on deletion
@@ -229,6 +213,47 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 	reqLogger.Info("Ensured topic")
 
 	return reconciled()
+}
+
+func (r *KafkaTopicReconciler) ensureClusterLabel(cluster *v1beta1.KafkaCluster, topic *v1alpha1.KafkaTopic) (*v1alpha1.KafkaTopic, error) {
+	labelValue := clusterLabelString(cluster)
+	labels := topic.GetLabels()
+	if label, ok := labels[clusterRefLabel]; ok {
+		if label != labelValue {
+			labels[clusterRefLabel] = labelValue
+		}
+	} else {
+		labels[clusterRefLabel] = labelValue
+	}
+	if !reflect.DeepEqual(labels, topic.GetLabels()) {
+		topic.SetLabels(labels)
+		return r.updateAndFetchLatest(topic)
+	}
+	return topic, nil
+}
+
+func (r *KafkaTopicReconciler) ensureControllerReference(cluster *v1beta1.KafkaCluster, topic *v1alpha1.KafkaTopic) (*v1alpha1.KafkaTopic, error) {
+	if err := controllerutil.SetControllerReference(cluster, topic, r.Scheme); err != nil {
+		if !k8sutil.IsAlreadyOwnedError(err) {
+			return nil, err
+		}
+	} else if err == nil {
+		return r.updateAndFetchLatest(topic)
+	}
+	return topic, nil
+}
+
+func (r *KafkaTopicReconciler) updateAndFetchLatest(topic *v1alpha1.KafkaTopic) (*v1alpha1.KafkaTopic, error) {
+	if err := r.Client.Update(context.TODO(), topic); err != nil {
+		return nil, err
+	}
+	return r.fetchMostRecent(topic)
+}
+
+func (r *KafkaTopicReconciler) fetchMostRecent(topic *v1alpha1.KafkaTopic) (*v1alpha1.KafkaTopic, error) {
+	updated := &v1alpha1.KafkaTopic{}
+	err := r.Client.Get(context.TODO(), client.ObjectKey{Name: topic.Name, Namespace: topic.Namespace}, updated)
+	return updated, err
 }
 
 func (r *KafkaTopicReconciler) syncTopicStatus(cluster *v1beta1.KafkaCluster, instance *v1alpha1.KafkaTopic, uid types.UID) {

@@ -16,14 +16,18 @@ package controllers
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
+	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/kafkaclient"
 	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+var clusterRefLabel = "kafkaCluster"
 
 func requeueWithError(logger logr.Logger, msg string, err error) (ctrl.Result, error) {
 	// Info log the error message and then let the reconciler dump the stacktrace
@@ -43,6 +47,10 @@ func getClusterRefNamespace(ns string, ref v1alpha1.ClusterReference) string {
 	return clusterNamespace
 }
 
+func clusterLabelString(cluster *v1beta1.KafkaCluster) string {
+	return fmt.Sprintf("%s.%s", cluster.Name, cluster.Namespace)
+}
+
 func newBrokerConnection(log logr.Logger, client client.Client, cluster *v1beta1.KafkaCluster) (broker kafkaclient.KafkaClient, close func(), err error) {
 
 	// Get a kafka connection
@@ -59,4 +67,27 @@ func newBrokerConnection(log logr.Logger, client client.Client, cluster *v1beta1
 		}
 	}
 	return
+}
+
+func checkBrokerConnectionError(logger logr.Logger, err error) (ctrl.Result, error) {
+	switch err.(type) {
+	case errorfactory.BrokersUnreachable:
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: time.Duration(15) * time.Second,
+		}, nil
+	case errorfactory.BrokersNotReady:
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: time.Duration(15) * time.Second,
+		}, nil
+	case errorfactory.ResourceNotReady:
+		logger.Info("Needed resource for broker connection not found, may not be ready")
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: time.Duration(5) * time.Second,
+		}, nil
+	default:
+		return requeueWithError(logger, err.Error(), err)
+	}
 }
