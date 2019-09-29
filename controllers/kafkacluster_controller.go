@@ -198,6 +198,8 @@ func (r *KafkaClusterReconciler) checkFinalizers(log logr.Logger, cluster *v1bet
 				// for n KafakTopics. There might be a better way - the above delete is
 				// asyncronous in that the kafkatopic_controller will be triggered in a
 				// seperate goroutine and the CR will only disspear once the finalizer is removed.
+				// We don't want to let it through as is because there will be a race condition
+				// as to if all the topics get fully removed from zookeeper before the brokers are gone.
 				log.Info(fmt.Sprintf("Still waiting for topic %s/%s to be deleted", deleted.Namespace, deleted.Name))
 				return ctrl.Result{
 					Requeue:      true,
