@@ -33,6 +33,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -163,6 +164,21 @@ func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Re
 		return r.checkFinalizers(reqLogger, cluster, instance, user)
 	}
 
+	// ensure a controller reference on the user
+	if err = controllerutil.SetControllerReference(cluster, instance, r.Scheme); err != nil {
+		if !k8sutil.IsAlreadyOwnedError(err) {
+			return requeueWithError(reqLogger, "failed to set controller reference on user", err)
+		}
+	} else if err == nil {
+		if err = r.Client.Update(context.TODO(), instance); err != nil {
+			return requeueWithError(reqLogger, "failed to update user with controller reference", err)
+		}
+		instance = &v1alpha1.KafkaUser{}
+		if err = r.Client.Get(context.TODO(), request.NamespacedName, instance); err != nil {
+			return requeueWithError(reqLogger, "failed to fetch updated user instance", err)
+		}
+	}
+
 	// If topic grants supplied, grab a broker connection and set ACLs
 	if len(instance.Spec.TopicGrants) > 0 {
 		broker, close, err := newBrokerConnection(reqLogger, r.Client, cluster)
@@ -189,6 +205,7 @@ func (r *KafkaUserReconciler) Reconcile(request reconcile.Request) (reconcile.Re
 			}
 		}
 		defer close()
+
 		// TODO (tinyzimmer): Should probably take this opportunity to see if we are removing any ACLs
 		for _, grant := range instance.Spec.TopicGrants {
 			reqLogger.Info(fmt.Sprintf("Ensuring %s ACLs for User: %s -> Topic: %s", grant.AccessType, user.DN(), grant.TopicName))

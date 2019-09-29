@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/banzaicloud/k8s-objectmatcher/patch"
+	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
 	"github.com/banzaicloud/kafka-operator/pkg/k8sutil"
@@ -38,6 +39,7 @@ import (
 	apiErrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -184,6 +186,23 @@ func (r *KafkaClusterReconciler) checkFinalizers(log logr.Logger, cluster *v1bet
 			log.Info(fmt.Sprintf("Deleting associated topic %s", topic.Name))
 			if err = r.Client.Delete(context.TODO(), &topic); err != nil {
 				return requeueWithError(log, "failed to delete kafkatopic", err)
+			}
+			deleted := &v1alpha1.KafkaTopic{}
+			if err = r.Client.Get(context.TODO(), types.NamespacedName{Name: topic.Name, Namespace: topic.Namespace}, deleted); err != nil {
+				if !apiErrors.IsNotFound(err) {
+					return requeueWithError(log, "failed to check if topic was deleted", err)
+				}
+			} else if err == nil {
+				// Topic hasn't finished deleting
+				// TODO (tinyzimmer): This basically means n*3 seconds to delete KafkaCluster
+				// for n KafakTopics. There might be a better way - the above delete is
+				// asyncronous in that the kafkatopic_controller will be triggered in a
+				// seperate goroutine and the CR will only disspear once the finalizer is removed.
+				log.Info(fmt.Sprintf("Still waiting for topic %s/%s to be deleted", deleted.Namespace, deleted.Name))
+				return ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: time.Duration(3) * time.Second,
+				}, nil
 			}
 		}
 	}

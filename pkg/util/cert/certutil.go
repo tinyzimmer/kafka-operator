@@ -25,7 +25,6 @@ import (
 	"math/big"
 	mathrand "math/rand"
 	"strings"
-	"text/template"
 	"time"
 
 	v1alpha1 "github.com/banzaicloud/kafka-operator/api/v1alpha1"
@@ -33,20 +32,6 @@ import (
 	keystore "github.com/pavel-v-chernykh/keystore-go"
 	corev1 "k8s.io/api/core/v1"
 )
-
-const (
-	ClientPropertiesKey = "client-ssl.properties"
-)
-
-// This gives the user of the secret a convenience consumer/producer config.
-// It may not be necessary.
-var clientPropertiesTemplate = `security.protocol=SSL
-ssl.truststore.location=/etc/certs/tls.jks
-ssl.truststore.password={{ .Password }}
-ssl.keystore.location=/etc/certs/tls.jks
-ssl.keystore.password={{ .Password }}
-ssl.key.password={{ .Password }}
-`
 
 // DecodeKey will take a PEM encoded Private Key and convert to raw der bytes
 func DecodeKey(raw []byte) (parsedKey []byte, err error) {
@@ -99,6 +84,7 @@ func GeneratePass(length int) (passw []byte) {
 	return
 }
 
+// EnsureSecretJKS ensures a JKS is present in a certificate secret
 func EnsureSecretJKS(secret *corev1.Secret) (injected *corev1.Secret, err error) {
 
 	// If the JKS is already present - return
@@ -117,21 +103,12 @@ func EnsureSecretJKS(secret *corev1.Secret) (injected *corev1.Secret, err error)
 		return
 	}
 
-	var propsOut bytes.Buffer
-	t := template.Must(template.New("client-ssl.properties").Parse(clientPropertiesTemplate))
-	err = t.Execute(&propsOut, map[string]string{
-		"Password": string(passw),
-	})
-	if err != nil {
-		return
-	}
-
 	injected.Data[v1alpha1.TLSJKSKey] = jks
 	injected.Data[v1alpha1.PasswordKey] = passw
-	injected.Data[ClientPropertiesKey] = propsOut.Bytes()
 	return
 }
 
+// GenerateJKS creates a JKS with a random password from a client cert/key combination
 func GenerateJKS(clientCert, clientKey, clientCA []byte) (out, passw []byte, err error) {
 
 	cert, err := DecodeCertificate(clientCert)

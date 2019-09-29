@@ -15,6 +15,8 @@
 package controllers
 
 import (
+	"fmt"
+
 	"github.com/banzaicloud/kafka-operator/api/v1alpha1"
 	"github.com/banzaicloud/kafka-operator/api/v1beta1"
 	"github.com/banzaicloud/kafka-operator/pkg/kafkaclient"
@@ -44,14 +46,16 @@ func getClusterRefNamespace(ns string, ref v1alpha1.ClusterReference) string {
 func newBrokerConnection(log logr.Logger, client client.Client, cluster *v1beta1.KafkaCluster) (broker kafkaclient.KafkaClient, close func(), err error) {
 
 	// Get a kafka connection
-	log.Info("Retrieving kafka client")
+	log.Info(fmt.Sprintf("Retrieving Kafka client for %s/%s", cluster.Namespace, cluster.Name))
 	broker, err = kafkaclient.NewFromCluster(client, cluster)
 	if err != nil {
 		return
 	}
 	close = func() {
 		if err := broker.Close(); err != nil {
-			log.Error(err, "Error closing kafka client")
+			log.Error(err, "Error closing Kafka client")
+		} else {
+			log.Info("Kafka client closed cleanly")
 		}
 	}
 	return

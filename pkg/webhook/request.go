@@ -82,7 +82,6 @@ func (s *webhookServer) serve(w http.ResponseWriter, r *http.Request) {
 		log.Error(err, "Can't decode body")
 		admissionResponse = notAllowed(err.Error(), metav1.StatusReasonBadRequest)
 	} else {
-		log.Info(fmt.Sprintf("%s %s", r.Method, r.URL.Path))
 		admissionResponse = s.validate(&ar)
 	}
 
@@ -99,7 +98,6 @@ func (s *webhookServer) serve(w http.ResponseWriter, r *http.Request) {
 		log.Error(err, "Can't encode response")
 		http.Error(w, fmt.Sprintf("could not encode response: %v", err), http.StatusInternalServerError)
 	}
-	log.Info("Writing response...")
 	if _, err := w.Write(resp); err != nil {
 		log.Error(err, "Can't write response")
 		http.Error(w, fmt.Sprintf("could not write response: %v", err), http.StatusInternalServerError)

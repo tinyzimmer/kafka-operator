@@ -103,12 +103,12 @@ func TestCreateTopic(t *testing.T) {
 
 func TestDeleteTopic(t *testing.T) {
 	client := newOpenedMockClient()
-	if err := client.DeleteTopic("test-topic"); err != nil {
+	if err := client.DeleteTopic("test-topic", false); err != nil {
 		t.Error("Expected no error, got:", err)
 	}
 
 	client.admin, _ = newMockClusterAdminFailOps([]string{}, sarama.NewConfig())
-	if err := client.DeleteTopic("test-topic"); err == nil {
+	if err := client.DeleteTopic("test-topic", false); err == nil {
 		t.Error("Expected error, got nil")
 	}
 }

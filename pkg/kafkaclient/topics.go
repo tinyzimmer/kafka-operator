@@ -17,6 +17,7 @@ package kafkaclient
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Shopify/sarama"
 	"github.com/banzaicloud/kafka-operator/pkg/errorfactory"
@@ -80,9 +81,27 @@ func (k *kafkaClient) CreateTopic(opts *CreateTopicOptions) (err error) {
 	return
 }
 
-// DeleteTopic deletes a topic
-func (k *kafkaClient) DeleteTopic(topic string) error {
-	return k.admin.DeleteTopic(topic)
+// DeleteTopic deletes a topic - when wait is specific, the method will not
+// return until the topic doesn't appear in the cluster topic list.
+func (k *kafkaClient) DeleteTopic(topicName string, wait bool) error {
+	err := k.admin.DeleteTopic(topicName)
+	if err != nil {
+		return err
+	}
+	if wait {
+		ticker := time.NewTicker(time.Duration(1) * time.Second)
+		select {
+		case <-ticker.C:
+			if topic, err := k.GetTopic(topicName); err != nil {
+				return err
+			} else if topic == nil {
+				return nil
+			} else {
+				log.Info(fmt.Sprintf("Topic %s still going down for deletion", topicName))
+			}
+		}
+	}
+	return nil
 }
 
 // EnsurePartitionCount will check if a partition increase is requested and apply

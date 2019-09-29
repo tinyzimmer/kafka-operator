@@ -35,7 +35,7 @@ type KafkaClient interface {
 	CreateTopic(*CreateTopicOptions) error
 	EnsurePartitionCount(string, int32) (bool, error)
 	EnsureTopicConfig(string, map[string]*string) error
-	DeleteTopic(string) error
+	DeleteTopic(string, bool) error
 	GetTopic(string) (*sarama.TopicDetail, error)
 	DescribeTopic(string) (*sarama.TopicMetadata, error)
 	CreateUserACLs(v1alpha1.KafkaAccessType, string, string) error

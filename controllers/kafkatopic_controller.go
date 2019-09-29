@@ -146,7 +146,7 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 	}
 	defer close()
 
-	// Check if marked for deletion and run finalizers
+	// Check if marked for deletion and if so run finalizers
 	if k8sutil.IsMarkedForDeletion(instance.ObjectMeta) {
 		return r.checkFinalizers(reqLogger, broker, instance)
 	}
@@ -200,6 +200,9 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 	}
 
 	// push any changes
+	// TODO (tinyzimmer): This is sometimes failing the first reconcile attempt
+	// still with an "object already modified" error. It's benign, but should dig
+	// deeper at some point.
 	if err = r.Client.Update(context.TODO(), instance); err != nil {
 		return requeueWithError(reqLogger, "failed to update KafkaTopic", err)
 	}
@@ -314,7 +317,13 @@ func (r *KafkaTopicReconciler) finalizeKafkaTopic(reqLogger logr.Logger, broker 
 		return err
 	}
 	if exists != nil {
-		if err = broker.DeleteTopic(topic.Spec.Name); err != nil {
+		// DeleteTopic with wait to make sure it goes down fully in case of cluster
+		// deletion.
+		// TODO (tinyzimmer): Perhaps this should only wait when it's the cluster
+		// being deleted, and use false when it's just the topic itself. Also,
+		// if delete.topic.enable=false this may hang forever, so should maybe
+		// check if that's the case during a wait.
+		if err = broker.DeleteTopic(topic.Spec.Name, true); err != nil {
 			return err
 		}
 		reqLogger.Info("Deleted topic")

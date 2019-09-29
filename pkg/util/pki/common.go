@@ -37,7 +37,7 @@ const (
 	// BrokerIssuerTemplate is the template used for broker issuer resources
 	BrokerIssuerTemplate = "%s-issuer"
 	// BrokerControllerTemplate is the template used for operator certificate resources
-	BrokerControllerTemplate = "%s-crd-controller"
+	BrokerControllerTemplate = "%s-controller"
 	// CAIntermediateTemplate is the template used for intermediate CA resources
 	CAIntermediateTemplate = "%s-intermediate.%s.cluster.local"
 	// CAFQDNTemplate is the template used for the FQDN of a CA
@@ -152,6 +152,7 @@ func LabelsForKafkaPKI(name string) map[string]string {
 	return map[string]string{"app": "kafka", "kafka_issuer": fmt.Sprintf(BrokerIssuerTemplate, name)}
 }
 
+// BrokerUserForCluster returns a KafkaUser CR for the broker certificates in a KafkaCluster
 func BrokerUserForCluster(cluster *v1beta1.KafkaCluster) *v1alpha1.KafkaUser {
 	return &v1alpha1.KafkaUser{
 		ObjectMeta: templates.ObjectMeta(GetCommonName(cluster), LabelsForKafkaPKI(cluster.Name), cluster),
@@ -167,9 +168,13 @@ func BrokerUserForCluster(cluster *v1beta1.KafkaCluster) *v1alpha1.KafkaUser {
 	}
 }
 
+// ControllerUserForCluster returns a KafkaUser CR for the controller/cc certificates in a KafkaCluster
 func ControllerUserForCluster(cluster *v1beta1.KafkaCluster) *v1alpha1.KafkaUser {
 	return &v1alpha1.KafkaUser{
-		ObjectMeta: templates.ObjectMeta(fmt.Sprintf(BrokerControllerTemplate, cluster.Name), LabelsForKafkaPKI(cluster.Name), cluster),
+		ObjectMeta: templates.ObjectMeta(
+			fmt.Sprintf("%s.%s.mgt.cluster.local", fmt.Sprintf(BrokerControllerTemplate, cluster.Name), cluster.Namespace),
+			LabelsForKafkaPKI(cluster.Name), cluster,
+		),
 		Spec: v1alpha1.KafkaUserSpec{
 			SecretName: fmt.Sprintf(BrokerControllerTemplate, cluster.Name),
 			IncludeJKS: true,
