@@ -287,7 +287,7 @@ func (r *KafkaTopicReconciler) doTopicStatusSync(syncLogger logr.Logger, cluster
 	}
 
 	// get topic status
-	status, err := r.getKafkaTopicStatus(cluster, topic)
+	status, err := r.getKafkaTopicStatus(syncLogger, cluster, topic)
 	if err != nil {
 		syncLogger.Error(err, "Failed to get current kafka topic status")
 		return true, err
@@ -303,13 +303,13 @@ func (r *KafkaTopicReconciler) doTopicStatusSync(syncLogger logr.Logger, cluster
 	return true, nil
 }
 
-func (r *KafkaTopicReconciler) getKafkaTopicStatus(cluster *v1beta1.KafkaCluster, topic *v1alpha1.KafkaTopic) (*v1alpha1.KafkaTopicStatus, error) {
+func (r *KafkaTopicReconciler) getKafkaTopicStatus(log logr.Logger, cluster *v1beta1.KafkaCluster, topic *v1alpha1.KafkaTopic) (*v1alpha1.KafkaTopicStatus, error) {
 	// grab a connection to kafka
-	k, err := kafkaclient.NewFromCluster(r.Client, cluster)
+	k, close, err := newBrokerConnection(log, r.Client, cluster)
 	if err != nil {
 		return nil, err
 	}
-	defer k.Close()
+	defer close()
 
 	// get topic metadata
 	meta, err := k.DescribeTopic(topic.Spec.Name)
