@@ -217,7 +217,10 @@ func (r *KafkaUserReconciler) ensureControllerReference(cluster *v1beta1.KafkaCl
 
 func (r *KafkaUserReconciler) ensureClusterLabel(cluster *v1beta1.KafkaCluster, user *v1alpha1.KafkaUser) (*v1alpha1.KafkaUser, error) {
 	labelValue := clusterLabelString(cluster)
-	labels := user.GetLabels()
+	var labels map[string]string
+	if labels = user.GetLabels(); labels == nil {
+		labels = make(map[string]string, 0)
+	}
 	if label, ok := labels[clusterRefLabel]; ok {
 		if label != labelValue {
 			labels[clusterRefLabel] = labelValue
@@ -268,6 +271,10 @@ func (r *KafkaUserReconciler) removeFinalizer(user *v1alpha1.KafkaUser) error {
 }
 
 func (r *KafkaUserReconciler) finalizeKafkaUserACLs(reqLogger logr.Logger, cluster *v1beta1.KafkaCluster, user *pkicommon.UserCertificate) error {
+	if k8sutil.IsMarkedForDeletion(cluster.ObjectMeta) {
+		reqLogger.Info("Cluster is being deleted, skipping ACL deletion")
+		return nil
+	}
 	var err error
 	reqLogger.Info("Deleting user ACLs from kafka")
 	broker, close, err := newBrokerConnection(reqLogger, r.Client, cluster)

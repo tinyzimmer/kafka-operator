@@ -217,7 +217,10 @@ func (r *KafkaTopicReconciler) Reconcile(request reconcile.Request) (reconcile.R
 
 func (r *KafkaTopicReconciler) ensureClusterLabel(cluster *v1beta1.KafkaCluster, topic *v1alpha1.KafkaTopic) (*v1alpha1.KafkaTopic, error) {
 	labelValue := clusterLabelString(cluster)
-	labels := topic.GetLabels()
+	var labels map[string]string
+	if labels = topic.GetLabels(); labels == nil {
+		labels = make(map[string]string, 0)
+	}
 	if label, ok := labels[clusterRefLabel]; ok {
 		if label != labelValue {
 			labels[clusterRefLabel] = labelValue

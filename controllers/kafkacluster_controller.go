@@ -204,6 +204,25 @@ func (r *KafkaClusterReconciler) checkFinalizers(log logr.Logger, cluster *v1bet
 		}
 	}
 
+	// If any of the topics still exist, it means their finalizer is still running.
+	// Wait to make sure we have fully cleaned up zookeeper. Also if we delete
+	// our kafkausers before all topics are finished cleaning up, we will lose
+	// our controller certificate.
+	log.Info("Ensuring all topics have finished cleaning up")
+	var childTopics v1alpha1.KafkaTopicList
+	if err = r.Client.List(context.TODO(), &childTopics); err != nil {
+		return requeueWithError(log, "failed to list kafkatopics", err)
+	}
+	for _, topic := range childTopics.Items {
+		if belongsToCluster(topic.Spec.ClusterRef, cluster) {
+			log.Info(fmt.Sprintf("Still waiting for topic %s/%s to be deleted", topic.Namespace, topic.Name))
+			return ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: time.Duration(3) * time.Second,
+			}, nil
+		}
+	}
+
 	// If we haven't deleted all kafkausers yet, iterate namespaces and delete all kafkausers
 	// with the matching label.
 	if util.StringSliceContains(cluster.GetFinalizers(), clusterUsersFinalizer) {
@@ -226,23 +245,6 @@ func (r *KafkaClusterReconciler) checkFinalizers(log logr.Logger, cluster *v1bet
 		}
 	}
 
-	// If any of the topics still exist, it means their finalizer is still running.
-	// Wait to make sure we have fully cleaned up zookeeper
-	log.Info("Ensuring all topics have finished cleaning up")
-	var childTopics v1alpha1.KafkaTopicList
-	if err = r.Client.List(context.TODO(), &childTopics); err != nil {
-		return requeueWithError(log, "failed to list kafkatopics", err)
-	}
-	for _, topic := range childTopics.Items {
-		if belongsToCluster(topic.Spec.ClusterRef, cluster) {
-			log.Info(fmt.Sprintf("Still waiting for topic %s/%s to be deleted", topic.Namespace, topic.Name))
-			return ctrl.Result{
-				Requeue:      true,
-				RequeueAfter: time.Duration(3) * time.Second,
-			}, nil
-		}
-	}
-
 	// Do any necessary PKI cleanup - a PKI backend should make sure any
 	// user finalizations are done before it does its final cleanup
 	log.Info("Tearing down any PKI resources for the kafkacluster")
@@ -261,6 +263,11 @@ func (r *KafkaClusterReconciler) checkFinalizers(log logr.Logger, cluster *v1bet
 
 	log.Info("Finalizing deletion of kafkacluster instance")
 	if _, err = r.removeFinalizer(cluster, clusterFinalizer); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			// We may have been a requeue from earlier with all conditions met - but with
+			// the state of the finalizer not yet reflected in the response we got.
+			return reconciled()
+		}
 		return requeueWithError(log, "failed to remove main finalizer", err)
 	}
 
