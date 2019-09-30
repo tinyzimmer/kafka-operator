@@ -42,7 +42,7 @@ func GetPKIManager(client client.Client, cluster *v1beta1.KafkaCluster) pkicommo
 	case v1beta1.PKIBackendVault:
 		return vaultpki.New(client, cluster)
 
-	// Return mock backend for testing
+	// Return mock backend for testing - cannot be triggered by CR due to enum in api schema
 	case MockBackend:
 		return newMockPKIManager(client, cluster)
 

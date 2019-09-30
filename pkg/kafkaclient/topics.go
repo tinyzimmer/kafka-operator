@@ -81,7 +81,7 @@ func (k *kafkaClient) CreateTopic(opts *CreateTopicOptions) (err error) {
 	return
 }
 
-// DeleteTopic deletes a topic - when wait is specific, the method will not
+// DeleteTopic deletes a topic - when wait is specified, the method will not
 // return until the topic doesn't appear in the cluster topic list.
 func (k *kafkaClient) DeleteTopic(topicName string, wait bool) error {
 	err := k.admin.DeleteTopic(topicName)
@@ -121,7 +121,7 @@ func (k *kafkaClient) EnsurePartitionCount(topic string, desired int32) (changed
 	}
 
 	if desired != int32(len(meta[0].Partitions)) {
-		// TODO: maybe let the user specify partition assignments
+		// TODO (tinyzimmer): maybe let the user specify partition assignments
 		assn := make([][]int32, 0)
 		changed = true
 		err = k.admin.CreatePartitions(topic, desired, assn, false)

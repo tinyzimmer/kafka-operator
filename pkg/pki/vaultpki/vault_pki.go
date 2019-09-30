@@ -221,7 +221,8 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 			Config: vaultapi.MountConfigInput{
 				MaxLeaseTTL: "219000h",
 			},
-		}); err != nil {
+		},
+	); err != nil {
 		return errorfactory.New(errorfactory.VaultAPIFailure{}, err, "failed to setup mount for root pki")
 	}
 
@@ -236,7 +237,7 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 	}
 
 	// Create a root CA
-	_, err = vault.Logical().Write(
+	if _, err = vault.Logical().Write(
 		fmt.Sprintf("%s/root/generate/internal", caPath),
 		map[string]interface{}{
 			vaultCommonNameArg:        fmt.Sprintf(pkicommon.CAFQDNTemplate, v.cluster.Name, v.cluster.Namespace),
@@ -244,8 +245,7 @@ func (v *vaultPKI) initVaultPKI(vault *vaultapi.Client) error {
 			vaultExcludeCNFromSANSArg: true,
 			vaultTTLArg:               "215000h",
 		},
-	)
-	if err != nil {
+	); err != nil {
 		return errorfactory.New(errorfactory.VaultAPIFailure{}, err, "failed to generate root certificate")
 	}
 
